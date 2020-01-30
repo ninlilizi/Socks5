@@ -96,7 +96,7 @@ namespace socks5.ExamplePlugins
             }
             else
             {
-                Dedupe = new DedupeLibrary("Test.db", 64, 1280, 64, 2, WriteChunk, ReadChunk, DeleteChunk, DebugDedupe, DebugSql);
+                Dedupe = new DedupeLibrary("Test.db", 64, 131072, 64, 2, WriteChunk, ReadChunk, DeleteChunk, DebugDedupe, DebugSql);
             }
             ///END Watson DeDupe
             ///
@@ -150,7 +150,7 @@ namespace socks5.ExamplePlugins
                     requestData.isChunked = DataHandlerDeDupe.IsChunked(e.Buffer);
                     requestData.contentLength = GetContentLength(e.Buffer);
                     requestData.totalRounds = Math.Ceiling((float)(requestData.contentLength) / (float)packetSize);
-                    Console.Write("<DeDupe> [Server response] HTTP        - RequestType:" + requestData.requestType.ToString() + " Address:" + requestData.host + " Port:" + requestData.port.ToString() + " URL:" + requestData.uRI + Environment.NewLine);
+                    Console.Write(Environment.NewLine + "<DeDupe> [Server response] HTTP        - RequestType:" + requestData.requestType.ToString() + " Address:" + requestData.host + " Port:" + requestData.port.ToString() + " URL:" + requestData.uRI + Environment.NewLine);
                     Console.Write("<DeDupe> [Server response] HTTP Header - " + "ContentLength:" + requestData.contentLength + " ExpectedRounds:" + requestData.totalRounds + " Chunked:" + DataHandlerDeDupe.IsChunked(e.Buffer).ToString() + Environment.NewLine);
                     
                     requestData.startPayload = e.Buffer.FindString("\r\n\r\n");
@@ -244,11 +244,12 @@ namespace socks5.ExamplePlugins
                             else
                             {
                                 // Dump out remains of buffer if not empty
+                                stripeCount = stripeBuffer.Count;
                                 requestData.currentRound++;
                                 if (stripeCount != 0)
                                 {
                                     Key = "HTTP/" + WebUtility.UrlEncode(requestData.host + requestData.port + requestData.uRI) + "-" + requestData.currentRound;
-                                    Dedupe.StoreObject(Key, stripeBuffer.Read(stripeCount), out Chunks);
+                                    Dedupe.StoreObject(Key, stripeBuffer.Read(stripeCount), out Chunks); // NIN - DEBUG LATER - Not enough data buffer, errors occuring here sporadically.
                                     
                                     Console.Write("#");
 
@@ -321,7 +322,7 @@ namespace socks5.ExamplePlugins
                 // Get URI
                 requestData.uRI = GetURI(e.Buffer);
 
-                Console.Write("<DeDupe> [Client received] HTTP        - RequestType:" + requestData.requestType.ToString() + " Address:" + requestData.host + " Port:" + requestData.port.ToString() + Environment.NewLine);
+                Console.Write(Environment.NewLine + "<DeDupe> [Client received] HTTP        - RequestType:" + requestData.requestType.ToString() + " Address:" + requestData.host + " Port:" + requestData.port.ToString() + Environment.NewLine);
 
                 requestData.isChunked = DataHandlerDeDupe.IsChunked(e.Buffer);
                 Console.Write("<DeDupe> [Client received] HTTP Header - Chunked:" + DataHandlerDeDupe.IsChunked(e.Buffer).ToString() + Environment.NewLine);
