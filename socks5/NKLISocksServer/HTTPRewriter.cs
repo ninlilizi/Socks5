@@ -20,7 +20,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using socks5;
-namespace Socks5Test
+namespace NKLISocksServer
 {
     class HTTPRewriter : socks5.Plugin.DataHandler
     {

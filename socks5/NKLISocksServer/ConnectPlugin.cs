@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace Socks5Test
+namespace NKLISocksServer
 {
     class ConnectPlugin : socks5.Plugin.ConnectHandler
     {

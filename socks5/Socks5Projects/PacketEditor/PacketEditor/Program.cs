@@ -16,7 +16,7 @@ namespace PacketEditor
         static void Main(string[] args)
         {           
             AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
-            sock5 = new Socks5Server(IPAddress.Any, 7777);
+            sock5 = new Socks5Server(IPAddress.Any, 7777, 4096);
             sock5.PacketSize = 65535;
             sock5.Start();
             Application.EnableVisualStyles();

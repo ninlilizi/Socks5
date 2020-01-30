@@ -216,7 +216,7 @@ namespace socks5.Socks5Client
             }
             else
             {
-                Client.ReceiveAsync(4096);
+                Client.ReceiveAsync(8192);
             }
         }
 

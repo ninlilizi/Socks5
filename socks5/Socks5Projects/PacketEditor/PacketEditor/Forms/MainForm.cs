@@ -16,7 +16,7 @@ namespace PacketEditor
         public MainForm()
         {
             InitializeComponent();
-            sock5 = new Socks5Server(IPAddress.Any, 1080);
+            sock5 = new Socks5Server(IPAddress.Any, 1080, 4096);
             sock5.Start();
         }
 

@@ -29,7 +29,7 @@ namespace socks5.Socks
 {
     class SocksSpecialTunnel
     {
-         public SocksRequest Req;
+        public SocksRequest Req;
         public SocksRequest ModifiedReq;
 
         public SocksClient Client;
@@ -38,16 +38,14 @@ namespace socks5.Socks
         private List<DataHandler> Plugins = new List<DataHandler>();
 
         private int Timeout = 10000;
-        private int PacketSize = 4096;
         private SocksEncryption se;
 
         public SocksSpecialTunnel(SocksClient p, SocksEncryption ph, SocksRequest req, SocksRequest req1, int packetSize, int timeout)
         {
-            RemoteClient = new Client(new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp), PacketSize);
+            RemoteClient = new Client(new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp), packetSize);
             Client = p;
             Req = req;
             ModifiedReq = req1;
-            PacketSize = packetSize;
             Timeout = timeout;
             se = ph; 
         }

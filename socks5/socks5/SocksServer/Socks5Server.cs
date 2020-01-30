@@ -41,7 +41,7 @@ namespace socks5
 
         private bool started;
 
-        public Socks5Server(IPAddress ip, int port)
+        public Socks5Server(IPAddress ip, int port, int packetSize)
         {
             Timeout = 5000;
             PacketSize = 4096;
@@ -56,7 +56,7 @@ namespace socks5
         {
             if (started) return;
             Plugin.PluginLoader.LoadPluginsFromDisk = LoadPluginsFromDisk;
-            PluginLoader.LoadPlugins(); 
+            PluginLoader.LoadPlugins();
             _server.PacketSize = PacketSize;
             _server.Start();
             started = true;

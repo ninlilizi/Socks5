@@ -19,31 +19,32 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using socks5;
+using System.Net;
+using System.Threading;
 using socks5.Plugin;
-namespace Socks5Test
+using socks5.ExamplePlugins;
+using socks5.Socks5Client;
+
+namespace NKLISocksServer
 {
-    class Auth : LoginHandler
+    class Program
     {
-        public override bool OnStart()
+        static void Main(string[] args)
         {
-            return true;
-        }
+            Socks5Server x = new Socks5Server(IPAddress.Any, 8080, 1024);
+            PluginLoader.ChangePluginStatus(false, typeof(Auth));
+            x.Start();
 
-        public override LoginStatus HandleLogin(socks5.Socks.User user)
-        {
-            return (user.Username == "test" && user.Password == "1234" ? LoginStatus.Correct : LoginStatus.Denied);
-        }
+            //Enable plugins
+            PluginLoader.ChangePluginStatus(true, typeof(DataHandlerDeDupe));
 
-        private bool enabled = false;
-        public override bool Enabled
-        {
-            get
+            while (true)
             {
-                return this.enabled;
-            }
-            set
-            {
-                this.enabled = value;
+                //Console.Clear();
+                //Console.Write("Total Clients: \t{0}\nTotal Recvd: \t{1:0.00##}MB\nTotal Sent: \t{2:0.00##}MB\n", x.Stats.TotalClients, ((x.Stats.NetworkReceived / 1024f) / 1024f), ((x.Stats.NetworkSent / 1024f) / 1024f));
+                //Console.Write("Receiving/sec: \t{0}\nSending/sec: \t{1}", x.Stats.SBytesReceivedPerSec, x.Stats.SBytesSentPerSec);
+                Thread.Sleep(1000);
             }
         }
     }

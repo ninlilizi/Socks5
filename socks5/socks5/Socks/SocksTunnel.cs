@@ -39,15 +39,13 @@ namespace socks5
         private List<DataHandler> Plugins = new List<DataHandler>();
 
         private int Timeout = 10000;
-        private int PacketSize = 4096;
 
         public SocksTunnel(SocksClient p, SocksRequest req, SocksRequest req1, int packetSize, int timeout)
         {
-            RemoteClient = new Client(new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp), PacketSize);
+            RemoteClient = new Client(new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp), packetSize);
             Client = p;
             Req = req;
             ModifiedReq = req1;
-            PacketSize = packetSize;
             Timeout = timeout;
         }
 
