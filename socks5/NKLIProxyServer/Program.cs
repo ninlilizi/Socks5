@@ -32,12 +32,13 @@ namespace NKLISocksServer
     {
         static void Main(string[] args)
         {
-            Socks5Server x = new Socks5Server(IPAddress.Any, 8080, 1024);
-            PluginLoader.ChangePluginStatus(false, typeof(Auth));
-            x.Start();
+            Socks5Server x = new Socks5Server(IPAddress.Any, 1081);
 
             //Enable plugins
+            PluginLoader.ChangePluginStatus(false, typeof(Auth));
             PluginLoader.ChangePluginStatus(true, typeof(DataHandlerDeDupe));
+
+            x.Start();
 
             while (true)
             {

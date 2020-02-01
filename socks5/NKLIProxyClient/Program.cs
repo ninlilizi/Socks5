@@ -17,27 +17,51 @@
 */
 
 using System;
-using System.Collections.Generic;
-using System.Text;
-using socks5;
 using System.Net;
-using System.Threading;
-using socks5.Plugin;
-using socks5.ExamplePlugins;
+using socks5;
 using socks5.Socks5Client;
+// Titanium Proxy
+using Titanium.Web.Proxy.Helpers;
+
 
 namespace NKLISocksClient
 {
     class Program
     {
-        public static void Main(string[] args)
+        public static int ListenerPort_Socks = 1080;
+        public static int ListenerPort_HTTP = 8000;
+
+        public static bool useSocksRelay = false;
+        public static int RemotePort_Socks = 1081;
+        public static string RemoteAddress_Socks = "localhost";
+
+        static void Main(string[] args)
         {
             //to test this - use something like proxifier or configure firefox for this proxy.
-            Socks5Server s = new Socks5Server(IPAddress.Any, 1080, 1024);
+            Socks5Server s = new Socks5Server(IPAddress.Any, ListenerPort_Socks);
             s.Start();
-        }
-    }
 
+
+
+            // Handle HTTP Proxy
+            if (RunTime.IsWindows)
+            {
+                // fix console hang due to QuickEdit mode
+                NKLI.DeDupeProxy.ConsoleHelper.DisableQuickEditMode();
+            }
+
+            // Start proxy controller
+            NKLI.DeDupeProxy.TitaniumController HTTPProxy = new NKLI.DeDupeProxy.TitaniumController();
+            HTTPProxy.StartProxy(ListenerPort_HTTP, useSocksRelay, ListenerPort_Socks);
+
+            Console.WriteLine("Hit any key to exit..");
+            Console.WriteLine();
+            Console.Read();
+
+            HTTPProxy.Stop();
+        }
+
+    }
 
 
     class TorSocks : socks5.Plugin.ConnectSocketOverrideHandler
@@ -46,8 +70,7 @@ namespace NKLISocksClient
         {
             //use a socks5client to connect to it and passthru the data.
             //port 9050 is where torsocks is running (linux & windows)
-            Socks5Client s = new Socks5Client("localhost", 8080, sr.Address, sr.Port, "un", "pw");
-
+            Socks5Client s = new Socks5Client(NKLISocksClient.Program.RemoteAddress_Socks, NKLISocksClient.Program.RemotePort_Socks, sr.Address, sr.Port, "un", "pw");
             if (s.Connect())
             {
                 //connect synchronously to block the thread.
@@ -58,7 +81,6 @@ namespace NKLISocksClient
                 Console.WriteLine("Failed!");
                 return null;
             }
-
         }
 
         private bool enabled = true;
@@ -76,3 +98,4 @@ namespace NKLISocksClient
         public override bool OnStart() { return true; }
     }
 }
+

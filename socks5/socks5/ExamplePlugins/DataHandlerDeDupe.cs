@@ -48,6 +48,8 @@ namespace socks5.ExamplePlugins
         ///END Watson DeDupe
         ///
 
+        public static int maxObjectSizeHTTP;
+        
         public static int packetSize = 4096;
         public static int stripeSize = 131072;
         public static ReadWriteBuffer stripeBuffer;
@@ -61,7 +63,7 @@ namespace socks5.ExamplePlugins
             public int contentLength;
             public int currentposition;
             public int startPayload;
-            public double totalRounds;
+            public double totalPackets;
             public double currentRound;
             public double remainingRounds;
             public string host;
@@ -69,7 +71,11 @@ namespace socks5.ExamplePlugins
             public string uRI;
             public int port;
             public int packetSize;
-            
+
+            public int Key;
+
+            public DedupeLibrary dedupeStream;
+            public DedupeStream cacheStream;
 
             public int requestType;
             public enum RequestType
@@ -102,20 +108,20 @@ namespace socks5.ExamplePlugins
             ///
 
             // Buffer to maximise search size
-            stripeBuffer = new ReadWriteBuffer(stripeSize);
-
+            //stripeBuffer = new ReadWriteBuffer(stripeSize);
 
             Console.Write(Environment.NewLine + "-------------------------" + Environment.NewLine + "DeDupe Engine Initialized" + Environment.NewLine + "-------------------------" + Environment.NewLine);
+
+            int maxSizeMB = 50;
+            maxObjectSizeHTTP = maxSizeMB * 1024 * 1024;
+            Console.Write("<DeDupe> Maximum system supported HTTP object size:" + (Int32.MaxValue / 1024 / 1024) + "Mb / Maximum HTTP object size:" + (maxObjectSizeHTTP / 1024 / 1024) + "Mb" + Environment.NewLine);
 
             // Gather index and dedupe stats
             if (Dedupe.IndexStats(out NumObjects, out NumChunks, out LogicalBytes, out PhysicalBytes, out DedupeRatioX, out DedupeRatioPercent))
             {
-                Console.WriteLine("Statistics:");
-                Console.WriteLine("  Number of objects : " + NumObjects);
-                Console.WriteLine("  Number of chunks  : " + NumChunks);
-                Console.WriteLine("  Logical bytes     : " + LogicalBytes + " bytes");
-                Console.WriteLine("  Physical bytes    : " + PhysicalBytes + " bytes");
-                Console.WriteLine("  Dedupe ratio      : " + DedupeRatioX + "X, " + DedupeRatioPercent + "%");
+                Console.WriteLine("  Number of objects: " + NumObjects + "/  Number of chunks: " + NumChunks);
+                Console.WriteLine("  Logical bytes    : " + LogicalBytes + " bytes" + "/  Physical bytes   : " + PhysicalBytes + " bytes");
+                Console.WriteLine("  Dedupe ratio     : " + DedupeRatioX + "X, " + DedupeRatioPercent + "%");
                 Console.WriteLine("-------------------------");
             }
 
@@ -132,27 +138,29 @@ namespace socks5.ExamplePlugins
 
         public override void OnServerDataReceived(object sender, TCP.DataEventArgs e)
         {
-            if (e.Request.Error != Socks.SocksError.Granted  || e.Buffer.Length == 0)
+            if (e.Request.Error != Socks.SocksError.Granted || e.Buffer.Length == 0)
             {
                 Console.Write("<DeDupe> Error:" + e.Request.Error + " Length:" + e.Buffer.Length.ToString() + Environment.NewLine);
                 return;
             }
 
-            requestData.packetSize = e.Buffer.Length;
+            requestData.packetSize = e.Count;
 
+
+            // Special handling for HTTP
             if (requestData.isHTTP)
             {
 
                 // Handle HTTP header gracefully
                 if (DataHandlerDeDupe.IsHTTPResponse200(e.Buffer) || requestData.isHeader)
                 {
-                    //requestData.isHeader = true;
+                    requestData.isHeader = true;
                     requestData.isChunked = DataHandlerDeDupe.IsChunked(e.Buffer);
                     requestData.contentLength = GetContentLength(e.Buffer);
-                    requestData.totalRounds = Math.Ceiling((float)(requestData.contentLength) / (float)packetSize);
+                    requestData.totalPackets = Math.Ceiling((float)(requestData.contentLength) / (float)packetSize);
                     Console.Write(Environment.NewLine + "<DeDupe> [Server response] HTTP        - RequestType:" + requestData.requestType.ToString() + " Address:" + requestData.host + " Port:" + requestData.port.ToString() + " URL:" + requestData.uRI + Environment.NewLine);
-                    Console.Write("<DeDupe> [Server response] HTTP Header - " + "ContentLength:" + requestData.contentLength + " ExpectedRounds:" + requestData.totalRounds + " Chunked:" + DataHandlerDeDupe.IsChunked(e.Buffer).ToString() + Environment.NewLine);
-                    
+                    Console.Write("<DeDupe> [Server response] HTTP Header - " + "ContentLength:" + requestData.contentLength + " ExpectedPackets:" + requestData.totalPackets + " Chunked:" + DataHandlerDeDupe.IsChunked(e.Buffer).ToString() + Environment.NewLine);
+
                     requestData.startPayload = e.Buffer.FindString("\r\n\r\n");
                     if (requestData.startPayload != -1)
                     {
@@ -160,18 +168,19 @@ namespace socks5.ExamplePlugins
                         requestData.currentposition = 0;
                         requestData.isHeader = false;
                     }
+                    if (requestData.contentLength != 0) stripeBuffer = new ReadWriteBuffer(requestData.contentLength + 1);
 
                     requestData.currentRound = 0;
                 }
-                else requestData.startPayload = 0;
+                //else requestData.startPayload = 0;
                 ///END
 
-                if (requestData.startPayload != -1)
+                if (requestData.startPayload > 0)
                 {
-                    int stripeCount = stripeBuffer.Count;
-                    int stripeSpaceRemaining = stripeSize - stripeCount - 1;
-                    int payloadLength = Math.Min((requestData.contentLength - requestData.startPayload - requestData.currentposition), packetSize);
-
+                    //int stripeCount = stripeBuffer.Count;
+                    //int stripeSpaceRemaining = stripeSize - stripeCount - 1;
+                    int payloadLength = Math.Min((requestData.contentLength - requestData.currentposition), requestData.packetSize - requestData.startPayload);
+                    int contentRemaining = requestData.contentLength - requestData.currentposition;
 
 
                     if (requestData.isChunked)
@@ -187,7 +196,6 @@ namespace socks5.ExamplePlugins
                     else
                     {
 
-
                         /*xxHash hash0 = new xxHash();
                         hash0.Init();
                         hash0.Update(e.Buffer, e.Count);
@@ -195,99 +203,102 @@ namespace socks5.ExamplePlugins
 
 
                         //if (Dedupe.StoreObject(Key, e.Buffer, out Chunks)) Console.WriteLine("<DeDupe> Stored: " + Key + Environment.NewLine);
-                        Key = "HTTP/" + WebUtility.UrlEncode(requestData.host + requestData.port + requestData.uRI) + "-" + requestData.currentRound;
+                        Key = "HTTP/" + WebUtility.UrlEncode(requestData.host + requestData.port + requestData.uRI);
                         if (Dedupe.ObjectExists(Key))
                         {
                             Console.Write("x");
+
+
+
+
                         }
                         else
                         {
-                            if (requestData.contentLength > requestData.currentposition)
-                            {
-                                bool isRoom = false;
-                                if (payloadLength < (stripeSpaceRemaining - 1)) isRoom = true;
 
-                                if (isRoom)
+
+
+                            // Stream entire payload into buffer to maximise efficiency
+                            int writeLength = Math.Min(e.Count - requestData.startPayload, (requestData.contentLength - requestData.currentposition));
+                            if (contentRemaining > 0)
+                            {
+                                
+                                byte[] shortBuffer = new byte[writeLength];
+                                try
                                 {
+                                    shortBuffer = e.Buffer.GetInBetween(requestData.startPayload, requestData.startPayload + writeLength);
+                                    requestData.startPayload = 0;
 
                                     try
                                     {
-                                        stripeBuffer.Write(e.Buffer.GetInBetween(requestData.startPayload, payloadLength));
+                                        Console.Write(Environment.NewLine + "---------------------------------------" + Key + Environment.NewLine + shortBuffer.GetBetween(0, Math.Max(shortBuffer.Length, 10)) + Environment.NewLine + "---------------------------------------" + Environment.NewLine);
+
+                                        stripeBuffer.Write(shortBuffer);
+                                        requestData.currentposition += shortBuffer.Length;
+
+                                        //Console.WriteLine("---!!----" + shortBuffer.Length + "/" +  stripeBuffer.Count + "---------!!----");
                                     }
-                                    catch { }
-                                    finally
+                                    catch
                                     {
-                                        Console.Write("-");
+                                        Console.Write("<DeDupe> bufferLength:" + stripeBuffer.Count + " shortBufferLength:" + shortBuffer.Length + " currentposition:" + requestData.currentposition + " contentRemaining:" + contentRemaining + Environment.NewLine);
+                                        throw new Exception("<DeDupe> Write ERROR to resourceBuffer");
                                     }
-                                                                    }
-                                else
-                                {
-                                    // Calculate indexs
-                                    int startCopy = requestData.startPayload;
-                                    int endCopy = startCopy + stripeSpaceRemaining;
-                                    int startNextCopy = endCopy + 1;
-                                    int endNextCopy = payloadLength;
-
-                                    // Write first slice to Buffer
-                                    stripeBuffer.Write(e.Buffer.GetInBetween(startCopy, endCopy));
-
-                                    // Get data for DeDupe storage
-                                    byte[] ChunkOutput = stripeBuffer.Read(stripeBuffer.Count);
-
-                                    Key = "HTTP/" + WebUtility.UrlEncode(requestData.host + requestData.port + requestData.uRI) + "-" + requestData.currentRound;
-                                    if (Dedupe.StoreObject(Key, ChunkOutput, out Chunks)) Console.Write(".");
-
-                                    // Copy overflow into Buffer
-                                    stripeBuffer.Write(e.Buffer.GetInBetween(startCopy, startNextCopy));
                                 }
-                            }
-                            else
-                            {
-                                // Dump out remains of buffer if not empty
-                                stripeCount = stripeBuffer.Count;
-                                requestData.currentRound++;
-                                if (stripeCount != 0)
+                                catch
                                 {
-                                    Key = "HTTP/" + WebUtility.UrlEncode(requestData.host + requestData.port + requestData.uRI) + "-" + requestData.currentRound;
-                                    Dedupe.StoreObject(Key, stripeBuffer.Read(stripeCount), out Chunks); // NIN - DEBUG LATER - Not enough data buffer, errors occuring here sporadically.
-                                    
-                                    Console.Write("#");
-
-                                    // Increment round counter
-                                    requestData.currentRound++;
+                                    Console.Write("<DeDupe> writeLength:" + writeLength + " shortBufferLength:" + shortBuffer + " bufferCount:" + e.Count + " length:" + e.Buffer.Length + " startPayload:" + requestData.startPayload + Environment.NewLine);
+                                    throw new Exception("<DeDupe> Write ERROR to shortBuffer");
                                 }
 
-                                Dedupe.StoreObject(Key, e.Buffer, out Chunks);
-                                Console.Write("*");
 
+                                Console.Write("-");
                             }
-                            
 
-                            //if (requestData.currentRound == requestData.totalRounds) Console.WriteLine("***FINAL ROUND***" + Environment.NewLine + e.Buffer.GetBetween(requestData.startPayload, payloadLength) + Environment.NewLine);
-                            //else Console.Write("{" + requestData.currentRound + "/" + requestData.totalRounds + "/" + requestData.remainingRounds + "}" + "[" + requestData.currentposition + "/" + requestData.contentLength + "]" + "(" + payloadLength + ")");
-                            //stripeBuffer.Write(e.Buffer.GetInBetween(requestData.startPayload, e.Count));
-                            //if (Dedupe.StoreObject(Key, e.Buffer.GetInBetween(requestData.startPayload, e.Count), out Chunks)) Console.Write(".");
-
-                            /*byte M = Convert.ToByte('M');
-                            byte[] header = e.Buffer.GetInBetween(0, requestData.startPayload);
-                            e.Buffer = new byte[e.Buffer.Length];
-                            for (int i = 0; i < e.Buffer.Length; i++)
+                            // When buffer is full
+                            if ( (contentRemaining == writeLength) && (stripeBuffer.Count != 0) )
                             {
-                                if (i < requestData.startPayload) e.Buffer.SetValue(header[i], i);
-                                else e.Buffer[i] = M;
-                            }*/
 
-                            //Console.WriteLine(Environment.NewLine + "#" + Environment.NewLine + e.Buffer.GetBetween(0, 4095) + "#");
+                                // Open a stream if none already exists
+                                if (requestData.cacheStream == null)
+                                {
+                                    Key = "HTTP/" + WebUtility.UrlEncode(requestData.host + requestData.port + requestData.uRI);
 
-                            // Increment round counter
-                            requestData.currentRound++;
 
-                            // Update position
-                            requestData.currentposition += payloadLength;
+                                    //byte[] derp = new byte[stripeBuffer.Count];
+                                    //derp = stripeBuffer.Read(stripeBuffer.Count);
+                                    //Console.WriteLine("---!!----" + stripeBuffer.Count + "---------!!----");
+
+                                    if (Dedupe == null) throw new Exception("<DeDupe> Library pointer == null");
+
+                                    try
+                                    {
+                                        int derpCount = stripeBuffer.Count;
+                                        byte[] derp = new byte[derpCount];
+                                        derp = stripeBuffer.Read(derpCount);
+                                        //Console.Write(Environment.NewLine + "---------------------------------------" + Environment.NewLine + derp.GetBetween(0, derpCount) + Environment.NewLine + "---------------------------------------" + Environment.NewLine);
+
+
+                                        Dedupe.StoreObject(Key, derp, out Chunks);
+                                    }
+                                    catch
+                                    {
+                                        Console.Write(Environment.NewLine + "<DeDupe> [ERROR] Failed to open output stream!" + Environment.NewLine + "                 Key Named:" + Key + Environment.NewLine);
+                                        Console.Write("                 Key Found:" + Dedupe.ObjectExists(Key).ToString() + Environment.NewLine);
+                                        Console.Write("contentRemaining:" + contentRemaining + " writeLength:" + writeLength + " stripeBufferCount:" + stripeBuffer.Count + Environment.NewLine);
+
+                                        throw new Exception(Environment.NewLine + "<DeDupe> [FATAL ERROR] Unable to write to cache:" + Key + Environment.NewLine);
+                                    }
+                                }
+
+                                Console.Write(Environment.NewLine + "<DeDupe> (STORED) length:" + requestData.contentLength + " key:" + Key + Environment.NewLine);
+                            }
+
                         }
 
-                    }
 
+                    }
+                    //We maintain this per 4k socks packet.
+                    // Update position
+                    //requestData.currentposition += payloadLength;
                 }
 
             }
@@ -369,11 +380,11 @@ namespace socks5.ExamplePlugins
         public static int GetContentLength(byte[] buffer)
         {
             int startIndex = buffer.FindString("Content-Length:");
-            if (startIndex == -1) return 0;
 
             int endIndex = buffer.FindString("\r\n", startIndex + 1);
+            int contentLength = Convert.ToInt32(buffer.GetBetween(startIndex + 16, endIndex));
 
-            return Convert.ToInt32(buffer.GetBetween(startIndex + 16, endIndex));
+            return contentLength;
         }
         public static string GetURI(byte[] buffer)
         {
@@ -417,8 +428,9 @@ namespace socks5.ExamplePlugins
         }
 
 
+        //
+        #region Watson DeDupe
 
-        //Watson DeDupe
         bool WriteChunk(Chunk data)
         {
             File.WriteAllBytes("Chunks\\" + data.Key, data.Value);
@@ -451,7 +463,8 @@ namespace socks5.ExamplePlugins
             }
             return true;
         }
-        ///END
+        #endregion
+        //END
 
     }
 

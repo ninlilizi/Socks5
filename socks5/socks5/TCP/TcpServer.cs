@@ -67,6 +67,7 @@ namespace socks5.TCP
                 Socket x = px.EndAcceptSocket(res);
                 Task.Set();
                 Client f = new Client(x, PacketSize);
+
                 //f.onClientDisconnected += onClientDisconnected;
                 //f.onDataReceived += onDataReceived;
                 //f.onDataSent += onDataSent;

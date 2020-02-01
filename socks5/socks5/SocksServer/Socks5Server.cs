@@ -41,7 +41,7 @@ namespace socks5
 
         private bool started;
 
-        public Socks5Server(IPAddress ip, int port, int packetSize)
+        public Socks5Server(IPAddress ip, int port)
         {
             Timeout = 5000;
             PacketSize = 4096;
@@ -61,7 +61,7 @@ namespace socks5
             _server.Start();
             started = true;
             //start thread.
-            NetworkStats = new Thread(new ThreadStart(delegate()
+            NetworkStats = new Thread(new ThreadStart(delegate ()
             {
                 while (started)
                 {
@@ -92,17 +92,17 @@ namespace socks5
             //call plugins related to ClientConnectedHandler.
             foreach (ClientConnectedHandler cch in PluginLoader.LoadPlugin(typeof(ClientConnectedHandler)))
             {
-				try
-				{
-					if (!cch.OnConnect(e.Client, (IPEndPoint)e.Client.Sock.RemoteEndPoint))
-					{
-						e.Client.Disconnect();
-						return;
-					}
-				}
-				catch
-				{
-				}
+                try
+                {
+                    if (!cch.OnConnect(e.Client, (IPEndPoint)e.Client.Sock.RemoteEndPoint))
+                    {
+                        e.Client.Disconnect();
+                        return;
+                    }
+                }
+                catch
+                {
+                }
             }
             SocksClient client = new SocksClient(e.Client);
             e.Client.onDataReceived += Client_onDataReceived;
@@ -120,13 +120,13 @@ namespace socks5
             this.Clients.Remove(e.Client);
             foreach (ClientDisconnectedHandler cdh in PluginLoader.LoadPlugin(typeof(ClientDisconnectedHandler)))
             {
-				try
-				{
-					cdh.OnDisconnected(sender, e);
-				}
-				catch
-				{
-				}
+                try
+                {
+                    cdh.OnDisconnected(sender, e);
+                }
+                catch
+                {
+                }
             }
         }
 

@@ -54,7 +54,12 @@ namespace socks5.TCP
                 SocketError err = SocketError.Success;
                 if(disposed)
                     return;
-                int received = ((Socket)res.AsyncState).EndReceive(res, out err);
+
+                // Ninlilizi - Exception handler to reduce console spam
+                int received = 0;
+                try {  received = ((Socket)res.AsyncState).EndReceive(res, out err); }
+                catch { }
+
                 if (received <= 0 || err != SocketError.Success)
                 {
                     this.Disconnect();
@@ -191,11 +196,15 @@ namespace socks5.TCP
             {
                 if (this.Sock != null)
                 {
-                    if (this.Sock.Send(buff, offset, count, SocketFlags.None) <= 0)
+                    try
                     {
-                        this.Disconnect();
-                        return false;
+                        if (this.Sock.Send(buff, offset, count, SocketFlags.None) <= 0)
+                        {
+                            this.Disconnect();
+                            return false;
+                        }
                     }
+                    catch { }
                     DataEventArgs data = new DataEventArgs(this, buff, count);
                     this.onDataSent(this, data);
                     return true;
