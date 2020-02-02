@@ -35,11 +35,16 @@ namespace NKLISocksClient
         public static int RemotePort_Socks = 1081;
         public static string RemoteAddress_Socks = "localhost";
 
+        public static Socks5Server socksServer = new Socks5Server(IPAddress.Any, ListenerPort_Socks);
+        public static NKLI.DeDupeProxy.TitaniumController HTTPProxy = new NKLI.DeDupeProxy.TitaniumController();
+
         static void Main(string[] args)
         {
+            AppDomain.CurrentDomain.ProcessExit += new EventHandler(Graceful_Shutdown);
+
+
             //to test this - use something like proxifier or configure firefox for this proxy.
-            Socks5Server s = new Socks5Server(IPAddress.Any, ListenerPort_Socks);
-            s.Start();
+            socksServer.Start();
 
 
 
@@ -51,18 +56,25 @@ namespace NKLISocksClient
             }
 
             // Start proxy controller
-            NKLI.DeDupeProxy.TitaniumController HTTPProxy = new NKLI.DeDupeProxy.TitaniumController();
             HTTPProxy.StartProxy(ListenerPort_HTTP, useSocksRelay, ListenerPort_Socks);
 
-            Console.WriteLine("Hit any key to exit..");
+            Console.WriteLine("Hit ENTER key to exit..");
             Console.WriteLine();
             Console.Read();
 
             HTTPProxy.Stop();
         }
 
-    }
 
+
+        static void Graceful_Shutdown(object sender, EventArgs e)
+        {
+            HTTPProxy.Stop();
+
+            socksServer.Stop();
+        }
+
+    }
 
     class TorSocks : socks5.Plugin.ConnectSocketOverrideHandler
     {
