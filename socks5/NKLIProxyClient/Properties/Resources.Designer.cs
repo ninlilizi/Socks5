@@ -63,9 +63,9 @@ namespace NKLISocksClient.Properties {
         /// <summary>
         ///   Looks up a localized string similar to app.manifest.
         /// </summary>
-        internal static string Application_Manifest {
+        internal static string ApplicationManifest {
             get {
-                return ResourceManager.GetString("Application Manifest", resourceCulture);
+                return ResourceManager.GetString("ApplicationManifest", resourceCulture);
             }
         }
     }

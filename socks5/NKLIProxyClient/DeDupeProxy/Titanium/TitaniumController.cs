@@ -148,7 +148,7 @@ namespace NKLI.DeDupeProxy
             }
             else
             {
-                deDupe = new DedupeLibrary("Test.db", 32768, 262144, 2048, 2, WriteChunk, ReadChunk, DeleteChunk, DebugDedupe, DebugSql);
+                deDupe = new DedupeLibrary("Test.db", 32768, 262144, 32768, 2, WriteChunk, ReadChunk, DeleteChunk, DebugDedupe, DebugSql);
             }
 
             Console.Write(Environment.NewLine + "-------------------------" + Environment.NewLine + "DeDupe Engine Initialized" + Environment.NewLine + "-------------------------" + Environment.NewLine);
@@ -232,11 +232,9 @@ namespace NKLI.DeDupeProxy
                             }
                             catch { await writeToConsole("<Titanium> Dedupilication attempt failed, URI:" + chunkStruct.URI, ConsoleColor.Red); }
 
-                            await writeToConsole("<DeDupe> [Titanium] stored object Size:" + String.Format("{0:n2}", (chunkStruct.Body.Length / 1024)) + "Kb Chunks:" + Chunks.Count + " URI:" + chunkStruct.URI, ConsoleColor.Yellow);
-                            // Gather index and dedupe stats
-
                             if (deDupe.IndexStats(out NumObjects, out NumChunks, out LogicalBytes, out PhysicalBytes, out DedupeRatioX, out DedupeRatioPercent))
-                                await writeToConsole("<DeDupe> [Objects:" + NumObjects + "]/[Chunks:" + NumChunks + "] - [Logical:" + String.Format("{0:n0}", (LogicalBytes / 1024)) + "Kb]/[Physical:" + String.Format("{0:n0}", (PhysicalBytes / 1024)) + "Kb] + [Ratio:" + Math.Round(DedupeRatioPercent, 4) + "%]", ConsoleColor.Yellow);
+                                writeToConsole("<DeDupe> [Titanium] stored object Size:" + String.Format("{0:n2}", (chunkStruct.Body.Length / 1024)) + "Kb Chunks:" + Chunks.Count + " URI:" + chunkStruct.URI + Environment.NewLine +
+                                                 "<DeDupe> [Objects:" + NumObjects + "]/[Chunks:" + NumChunks + "] - [Logical:" + String.Format("{0:n0}", (LogicalBytes / 1024)) + "Kb]/[Physical:" + String.Format("{0:n0}", (PhysicalBytes / 1024)) + "Kb] + [Ratio:" + Math.Round(DedupeRatioPercent, 4) + "%]", ConsoleColor.Yellow);
 
                             //session.Flush();
                         }
@@ -254,13 +252,16 @@ namespace NKLI.DeDupeProxy
             chunkQueue = new PersistentQueue("chunkQueue");
             chunkQueue.Internals.ParanoidFlushing = false;
 
+            threadWriteChunks.Priority = ThreadPriority.BelowNormal;
             threadWriteChunks.IsBackground = true;
             threadWriteChunks.Start();
 
+            threadDeDupe.Priority = ThreadPriority.Lowest;
             threadDeDupe.IsBackground = true;
             threadDeDupe.Start();
 
-
+            // Required for certificate storage
+            if (!Directory.Exists("crts")) Directory.CreateDirectory("crts");
 
 
             RemotePort_Socks = socksProxyPort;
@@ -302,7 +303,7 @@ namespace NKLI.DeDupeProxy
             // SOCKS proxy
             if (useSocksRelay)
             {
-                proxyServer.UpStreamHttpProxy = new ExternalProxy("127.0.0.1", socksProxyPort)
+                proxyServer.UpStreamHttpProxy = new ExternalProxy ("127.0.0.1", socksProxyPort)
                 { ProxyType = ExternalProxyType.Socks5, UserName = "User1", Password = "Pass" };
                 proxyServer.UpStreamHttpsProxy = new ExternalProxy("127.0.0.1", socksProxyPort)
                 { ProxyType = ExternalProxyType.Socks5, UserName = "User1", Password = "Pass" };
@@ -447,12 +448,12 @@ namespace NKLI.DeDupeProxy
                 {
                     var data = frame.Data.ToArray();
                     string str = string.Join(",", data.ToArray().Select(x => x.ToString("X2")));
-                    writeToConsole(str, color).Wait();
+                    //writeToConsole(str, color).Wait();
                 }
 
                 if (frame.OpCode == WebsocketOpCode.Text)
                 {
-                    writeToConsole(frame.GetText(), color).Wait();
+                    //writeToConsole(frame.GetText(), color).Wait();
                 }
             }
         }
@@ -627,16 +628,28 @@ namespace NKLI.DeDupeProxy
 
             //if (!e.ProxySession.Request.Host.Equals("medeczane.sgk.gov.tr")) return;
             //if (!e.HttpClient.Request.Host.Equals("www.gutenberg.org")) return;
-            if (e.HttpClient.Request.Method == "GET" || e.HttpClient.Request.Method == "POST")
+            if ((e.HttpClient.Request.Method == "GET" || e.HttpClient.Request.Method == "POST") && (e.HttpClient.Response.StatusCode == (int)HttpStatusCode.OK) && e.HttpClient.Response.HasBody)
             {
-                if (e.HttpClient.Response.StatusCode == (int)HttpStatusCode.OK)
+
+                byte[] output = new byte[0];
+                try
                 {
-                    byte[] output = await e.GetResponseBody();
+                    output = await e.GetResponseBody();
 
                     string Key = e.HttpClient.Request.Url;
 
                     // Respect cache control headers
-                    HttpHeader cacheControl = e.HttpClient.Response.Headers.GetFirstHeader("Cache-Control");
+                    HttpHeader cacheControl = new HttpHeader("Cache-Control", "none");
+                    try
+                    {
+                        HttpHeader header = e.HttpClient.Response.Headers.GetFirstHeader("Cache-Control");
+                        if (header != null) cacheControl = header;
+                    }
+                    catch
+                    {
+                        await writeToConsole("<Titanium> (onResponse) Exception occured inspecting cache-control header", ConsoleColor.Red);
+                    }
+
                     if (cacheControl.Value.Contains("no-cache") || cacheControl.Value.Contains("no-store"))
                     {
                         await writeToConsole("<DeDupe> [Titanium] Respecting no-cache header for key:" + Key, ConsoleColor.DarkYellow);
@@ -653,7 +666,7 @@ namespace NKLI.DeDupeProxy
                         try
                         {
                             // For now we only want to avoid caching range-requests and put a max size on incoming objects
-                            if ( (output.Count() == e.HttpClient.Response.ContentLength) && (maxObjectSizeHTTP > e.HttpClient.Response.ContentLength) )
+                            if ((output.Count() == e.HttpClient.Response.ContentLength) && (maxObjectSizeHTTP > e.HttpClient.Response.ContentLength))
                             {
                                 //Struct for marshal transform
                                 ObjectStruct responseStruct = new ObjectStruct();
@@ -697,19 +710,23 @@ namespace NKLI.DeDupeProxy
 
 
                     }
-
-                    /*if (e.HttpClient.Response.ContentType != null && e.HttpClient.Response.ContentType.Trim().ToLower().Contains("text/html"))
-                    {
-                        var bodyBytes = await e.GetResponseBody();
-                        e.SetResponseBody(TitaniumHelper.ToByteArray("M"));
-
-                        string body = await e.GetResponseBodyAsString();
-                        e.SetResponseBodyString("M");
-
-
-                    }*/
+                }
+                catch
+                {
+                    await writeToConsole("<Titanium> (onResponse) Exception occured receiving response body", ConsoleColor.Red);
+                    //throw new Exception("<Titanium> (onResponse) Exception occured receiving response body");
                 }
 
+                /*if (e.HttpClient.Response.ContentType != null && e.HttpClient.Response.ContentType.Trim().ToLower().Contains("text/html"))
+                {
+                    var bodyBytes = await e.GetResponseBody();
+                    e.SetResponseBody(TitaniumHelper.ToByteArray("M"));
+
+                    string body = await e.GetResponseBodyAsString();
+                    e.SetResponseBodyString("M");
+
+
+                }*/
             }
         }
 
