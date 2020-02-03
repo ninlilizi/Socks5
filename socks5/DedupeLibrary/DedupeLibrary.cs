@@ -731,7 +731,7 @@ namespace WatsonDedupe
         /// <param name="dedupeRatioX">Deduplication ratio represented as a multiplier.</param>
         /// <param name="dedupeRatioPercent">Deduplication ratio represented as a percentage.</param>
         /// <returns>True if successful.</returns>
-        public bool IndexStats(out int numObjects, out int numChunks, out long logicalBytes, out long physicalBytes, out decimal dedupeRatioX, out decimal dedupeRatioPercent)
+        public bool IndexStats(out ulong numObjects, out ulong numChunks, out ulong logicalBytes, out ulong physicalBytes, out decimal dedupeRatioX, out decimal dedupeRatioPercent)
         {
             return _Database.IndexStats(out numObjects, out numChunks, out logicalBytes, out physicalBytes, out dedupeRatioX, out dedupeRatioPercent);
         }

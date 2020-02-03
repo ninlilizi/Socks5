@@ -32,6 +32,10 @@
     <DocumentationFile>C:\Code\Watson\WatsonDedupe-1.4\DedupeLibrary\DedupeLibrary.xml</DocumentationFile>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net46|AnyCPU'">
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <None Include="..\LICENSE.md">
       <Pack>True</Pack>

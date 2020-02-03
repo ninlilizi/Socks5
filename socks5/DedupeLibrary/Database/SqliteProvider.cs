@@ -607,7 +607,7 @@ namespace WatsonDedupe.Database
         /// <param name="dedupeRatioX">Deduplication ratio represented as a multiplier.</param>
         /// <param name="dedupeRatioPercent">Deduplication ratio represented as a percentage.</param>
         /// <returns>True if successful.</returns>
-        public override bool IndexStats(out int numObjects, out int numChunks, out long logicalBytes, out long physicalBytes, out decimal dedupeRatioX, out decimal dedupeRatioPercent)
+        public override bool IndexStats(out ulong numObjects, out ulong numChunks, out ulong logicalBytes, out ulong physicalBytes, out decimal dedupeRatioX, out decimal dedupeRatioPercent)
         {
             numObjects = 0;
             numChunks = 0;
@@ -642,10 +642,10 @@ namespace WatsonDedupe.Database
 
             foreach (DataRow curr in result.Rows)
             {
-                if (curr["NumObjects"] != DBNull.Value) numObjects = Convert.ToInt32(curr["NumObjects"]);
-                if (curr["NumChunks"] != DBNull.Value) numChunks = Convert.ToInt32(curr["NumChunks"]);
-                if (curr["LogicalBytes"] != DBNull.Value) logicalBytes = Convert.ToInt32(curr["LogicalBytes"]);
-                if (curr["PhysicalBytes"] != DBNull.Value) physicalBytes = Convert.ToInt32(curr["PhysicalBytes"]);
+                if (curr["NumObjects"] != DBNull.Value) numObjects = Convert.ToUInt64(curr["NumObjects"]);
+                if (curr["NumChunks"] != DBNull.Value) numChunks = Convert.ToUInt64(curr["NumChunks"]);
+                if (curr["LogicalBytes"] != DBNull.Value) logicalBytes = Convert.ToUInt64(curr["LogicalBytes"]);
+                if (curr["PhysicalBytes"] != DBNull.Value) physicalBytes = Convert.ToUInt64(curr["PhysicalBytes"]);
 
                 if (physicalBytes > 0 && logicalBytes > 0)
                 {

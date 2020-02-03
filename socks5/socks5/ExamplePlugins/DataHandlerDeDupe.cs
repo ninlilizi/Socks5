@@ -39,10 +39,10 @@ namespace socks5.ExamplePlugins
 
         static bool DebugDedupe = false;
         static bool DebugSql = false;
-        static int NumObjects;
-        static int NumChunks;
-        static long LogicalBytes;
-        static long PhysicalBytes;
+        static ulong NumObjects;
+        static ulong NumChunks;
+        static ulong LogicalBytes;
+        static ulong PhysicalBytes;
         static decimal DedupeRatioX;
         static decimal DedupeRatioPercent;
         ///END Watson DeDupe

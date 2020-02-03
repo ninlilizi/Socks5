@@ -188,7 +188,7 @@
             <param name="garbageCollect">True if the chunk data can be garbage collected.</param>
             <returns>True if successful.</returns>
         </member>
-        <member name="M:WatsonDedupe.Database.DbProvider.IndexStats(System.Int32@,System.Int32@,System.Int64@,System.Int64@,System.Decimal@,System.Decimal@)">
+        <member name="M:WatsonDedupe.Database.DbProvider.IndexStats(System.UInt64@,System.UInt64@,System.UInt64@,System.UInt64@,System.Decimal@,System.Decimal@)">
             <summary>
             Retrieve statistics for the index.
             </summary>
@@ -312,7 +312,7 @@
             <param name="garbageCollect">Boolean indicating if the chunk should be garbage collected.</param>
             <returns>True if successful.</returns>
         </member>
-        <member name="M:WatsonDedupe.Database.SqliteProvider.IndexStats(System.Int32@,System.Int32@,System.Int64@,System.Int64@,System.Decimal@,System.Decimal@)">
+        <member name="M:WatsonDedupe.Database.SqliteProvider.IndexStats(System.UInt64@,System.UInt64@,System.UInt64@,System.UInt64@,System.Decimal@,System.Decimal@)">
             <summary>
             Retrieve index statistics.
             </summary>
@@ -583,7 +583,7 @@
             <param name="chunkKey">The chunk's key.</param>
             <returns>Boolean indicating if the chunk exists.</returns>
         </member>
-        <member name="M:WatsonDedupe.DedupeLibrary.IndexStats(System.Int32@,System.Int32@,System.Int64@,System.Int64@,System.Decimal@,System.Decimal@)">
+        <member name="M:WatsonDedupe.DedupeLibrary.IndexStats(System.UInt64@,System.UInt64@,System.UInt64@,System.UInt64@,System.Decimal@,System.Decimal@)">
             <summary>
             Retrieve deduplication index statistics.
             </summary>
