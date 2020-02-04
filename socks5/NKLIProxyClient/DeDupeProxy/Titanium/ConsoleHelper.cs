@@ -7,7 +7,7 @@ namespace NKLI.DeDupeProxy
     ///     Adapted from
     ///     http://stackoverflow.com/questions/13656846/how-to-programmatic-disable-c-sharp-console-applications-quick-edit-mode
     /// </summary>
-    public static class ConsoleHelper
+    public static class NativeMethods
     {
         private const uint ENABLE_QUICK_EDIT = 0x0040;
 

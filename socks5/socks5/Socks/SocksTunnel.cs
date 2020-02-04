@@ -130,10 +130,10 @@ namespace socks5
                 //all plugins get the event thrown.
                 foreach (DataHandler data in PluginLoader.LoadPlugin(typeof(DataHandler)))
                     Plugins.Push(data);
-                Client.Client.onDataReceived += Client_onDataReceived;
-                RemoteClient.onDataReceived += RemoteClient_onDataReceived;
-                RemoteClient.onClientDisconnected += RemoteClient_onClientDisconnected;
-                Client.Client.onClientDisconnected += Client_onClientDisconnected;
+                Client.Client.OnDataReceived += Client_onDataReceived;
+                RemoteClient.OnDataReceived += RemoteClient_onDataReceived;
+                RemoteClient.OnClientDisconnected += RemoteClient_onClientDisconnected;
+                Client.Client.OnClientDisconnected += Client_onClientDisconnected;
                 RemoteClient.ReceiveAsync();
                 Client.Client.ReceiveAsync();
             }
@@ -150,8 +150,8 @@ namespace socks5
             //Console.WriteLine("Client DC'd");
             disconnected = true;
             RemoteClient.Disconnect();
-            RemoteClient.onDataReceived -= RemoteClient_onDataReceived;
-            RemoteClient.onClientDisconnected -= RemoteClient_onClientDisconnected;
+            RemoteClient.OnDataReceived -= RemoteClient_onDataReceived;
+            RemoteClient.OnClientDisconnected -= RemoteClient_onClientDisconnected;
         }
 
         void RemoteClient_onClientDisconnected(object sender, ClientEventArgs e)
@@ -164,8 +164,8 @@ namespace socks5
             //Console.WriteLine("Remote DC'd");
             disconnected = true;
             Client.Client.Disconnect();
-            Client.Client.onDataReceived -= Client_onDataReceived;
-            Client.Client.onClientDisconnected -= Client_onClientDisconnected;
+            Client.Client.OnDataReceived -= Client_onDataReceived;
+            Client.Client.OnClientDisconnected -= Client_onClientDisconnected;
         }
 
         void RemoteClient_onDataReceived(object sender, DataEventArgs e)

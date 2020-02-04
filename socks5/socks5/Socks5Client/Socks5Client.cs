@@ -107,7 +107,7 @@ namespace socks5.Socks5Client
             //
             p = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             Client = new Client(p, 4200);
-            Client.onClientDisconnected += Client_onClientDisconnected;
+            Client.OnClientDisconnected += Client_onClientDisconnected;
             Client.Sock.BeginConnect(new IPEndPoint(ipAddress, Port), new AsyncCallback(onConnected), Client);
             //return status?
         }
@@ -267,7 +267,7 @@ namespace socks5.Socks5Client
                 //Client.onDataReceived += Client_onDataReceived;
                 if(Socks.DoSocksAuth(this, Username, Password))
                     if (Socks.SendRequest(Client, enc, Dest, Destport) == SocksError.Granted) {
-                        Client.onDataReceived += Client_onDataReceived;
+                        Client.OnDataReceived += Client_onDataReceived;
                         return true;
                     }
                 return false;
@@ -293,7 +293,7 @@ namespace socks5.Socks5Client
             if (Socks.DoSocksAuth(this, Username, Password))
             {
                 SocksError p = Socks.SendRequest(Client, enc, Dest, Destport);
-                Client.onDataReceived += Client_onDataReceived;
+                Client.OnDataReceived += Client_onDataReceived;
                 this.OnConnected(this, new Socks5ClientArgs(this, p));
                 
             }

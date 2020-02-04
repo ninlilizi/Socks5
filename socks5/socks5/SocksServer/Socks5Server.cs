@@ -49,7 +49,7 @@ namespace socks5
             Stats = new Stats();
             OutboundIPAddress = IPAddress.Any;
             _server = new TcpServer(ip, port);
-            _server.onClientConnected += _server_onClientConnected;
+            _server.OnClientConnected += _server_onClientConnected;
         }
 
         public void Start()
@@ -105,8 +105,8 @@ namespace socks5
                 }
             }
             SocksClient client = new SocksClient(e.Client);
-            e.Client.onDataReceived += Client_onDataReceived;
-            e.Client.onDataSent += Client_onDataSent;
+            e.Client.OnDataReceived += Client_onDataReceived;
+            e.Client.OnDataSent += Client_onDataSent;
             client.onClientDisconnected += client_onClientDisconnected;
             Clients.Add(client);
             client.Begin(this.OutboundIPAddress, this.PacketSize, this.Timeout);
@@ -115,8 +115,8 @@ namespace socks5
         void client_onClientDisconnected(object sender, SocksClientEventArgs e)
         {
             e.Client.onClientDisconnected -= client_onClientDisconnected;
-            e.Client.Client.onDataReceived -= Client_onDataReceived;
-            e.Client.Client.onDataSent -= Client_onDataSent;
+            e.Client.Client.OnDataReceived -= Client_onDataReceived;
+            e.Client.Client.OnDataSent -= Client_onDataSent;
             this.Clients.Remove(e.Client);
             foreach (ClientDisconnectedHandler cdh in PluginLoader.LoadPlugin(typeof(ClientDisconnectedHandler)))
             {

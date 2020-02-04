@@ -31,8 +31,8 @@ namespace socks5.TCP
         private bool accept = false;
         public int PacketSize{get;set;}
 
-        public event EventHandler<ClientEventArgs> onClientConnected = delegate { };
-        public event EventHandler<ClientEventArgs> onClientDisconnected = delegate { };
+        public event EventHandler<ClientEventArgs> OnClientConnected = delegate { };
+        public event EventHandler<ClientEventArgs> OnClientDisconnected = delegate { };
 
         //public event EventHandler<DataEventArgs> onDataReceived = delegate { };
         //public event EventHandler<DataEventArgs> onDataSent = delegate { };
@@ -71,7 +71,7 @@ namespace socks5.TCP
                 //f.onClientDisconnected += onClientDisconnected;
                 //f.onDataReceived += onDataReceived;
                 //f.onDataSent += onDataSent;
-                onClientConnected(this, new ClientEventArgs(f));
+                OnClientConnected(this, new ClientEventArgs(f));
             }
             catch(Exception ex)
             {

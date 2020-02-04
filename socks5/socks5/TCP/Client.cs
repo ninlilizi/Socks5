@@ -26,10 +26,10 @@ namespace socks5.TCP
 {
     public class Client
     {
-        public event EventHandler<ClientEventArgs> onClientDisconnected;
+        public event EventHandler<ClientEventArgs> OnClientDisconnected;
 
-        public event EventHandler<DataEventArgs> onDataReceived = delegate { };
-        public event EventHandler<DataEventArgs> onDataSent = delegate { };
+        public event EventHandler<DataEventArgs> OnDataReceived = delegate { };
+        public event EventHandler<DataEventArgs> OnDataSent = delegate { };
 
         public Socket Sock { get; set; }
         private byte[] buffer;
@@ -40,7 +40,7 @@ namespace socks5.TCP
         {
             //start the data exchange.
             Sock = sock;
-            onClientDisconnected = delegate { };
+            OnClientDisconnected = delegate { };
             buffer = new byte[PacketSize];
             packetSize = PacketSize;
             sock.ReceiveBufferSize = PacketSize;
@@ -66,7 +66,7 @@ namespace socks5.TCP
                     return;
                 }
                 DataEventArgs data = new DataEventArgs(this, buffer, received);
-                this.onDataReceived(this, data);
+                this.OnDataReceived(this, data);
             }
             catch (Exception ex)
             {
@@ -133,13 +133,13 @@ namespace socks5.TCP
                 {
                     if (this.Sock != null && this.Sock.Connected)
                     {
-                        onClientDisconnected(this, new ClientEventArgs(this));
+                        OnClientDisconnected(this, new ClientEventArgs(this));
                         this.Sock.Close();
                         //this.Sock = null;
                         return;
                     }
                     else
-                        onClientDisconnected(this, new ClientEventArgs(this));
+                        OnClientDisconnected(this, new ClientEventArgs(this));
                     this.Dispose();
                 }
             }
@@ -158,7 +158,7 @@ namespace socks5.TCP
                     return;
                 }
                 DataEventArgs data = new DataEventArgs(this, new byte[0] {}, sent);
-                this.onDataSent(this, data);
+                this.OnDataSent(this, data);
             }
             catch (Exception ex) {
 #if DEBUG
@@ -206,7 +206,7 @@ namespace socks5.TCP
                     }
                     catch { }
                     DataEventArgs data = new DataEventArgs(this, buff, count);
-                    this.onDataSent(this, data);
+                    this.OnDataSent(this, data);
                     return true;
                 }
                 return false;
@@ -246,9 +246,9 @@ namespace socks5.TCP
                 //
                 Sock = null;
                 buffer = null;
-                onClientDisconnected = null;
-                onDataReceived = null;
-                onDataSent = null;
+                OnClientDisconnected = null;
+                OnDataReceived = null;
+                OnDataSent = null;
             }
 
             // Free any unmanaged objects here. 

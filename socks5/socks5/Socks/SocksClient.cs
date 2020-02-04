@@ -39,7 +39,7 @@ namespace socks5.Socks
         public SocksRequest Destination { get { return req1; } }
         public void Begin(IPAddress outboundInterface, int PacketSize, int Timeout)
         {
-            Client.onClientDisconnected += Client_onClientDisconnected;
+            Client.OnClientDisconnected += Client_onClientDisconnected;
             List<AuthTypes> authtypes = Socks5.RequestAuth(this);
             if (authtypes.Count <= 0)
             {
@@ -145,7 +145,7 @@ namespace socks5.Socks
         void Client_onClientDisconnected(object sender, ClientEventArgs e)
         {
             this.onClientDisconnected(this, new SocksClientEventArgs(this));
-            Client.onClientDisconnected -= Client_onClientDisconnected;
+            Client.OnClientDisconnected -= Client_onClientDisconnected;
             //added to clear up memory
         }
     }

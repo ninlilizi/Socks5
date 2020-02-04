@@ -22,7 +22,7 @@ using WatsonDedupe;
 
 namespace NKLI.DeDupeProxy
 {
-    public class TitaniumController
+    public class TitaniumController : IDisposable
     {
         private readonly SemaphoreSlim @lock = new SemaphoreSlim(1);
         private ProxyServer proxyServer;
@@ -34,14 +34,55 @@ namespace NKLI.DeDupeProxy
 
         public static IPersistentQueue chunkQueue;
 
-        struct ObjectStruct
+        // The struct between worlds. Functional window in the sandbox
+        [StructLayout(LayoutKind.Sequential)]
+        struct ObjectStruct : IDisposable
         {
+            // None array members must be defined as fixed size to C++ handling constraints
             [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
             public string URI;
+            // SafeArray is a magic member that allows for non-fixed size assignments during marshal operations but
+            //  needs marshal operations but needs special handling to avoid memory leak or illegal access exceptions
             [MarshalAs(UnmanagedType.SafeArray)]
             public byte[] Headers;
             [MarshalAs(UnmanagedType.SafeArray)]
             public byte[] Body;
+
+            private GCHandle URIHandle;
+            private GCHandle HeadersHandle;
+            private GCHandle BodyHandle;
+
+            public ObjectStruct(string requestURI, byte[] incomingHeaders, byte[] incomingBody)
+            {
+                //URI = new string((char*)256); -- unsafe, fixed sized, unmanaged c++ assignment
+                //  There are situations where you might need to do the above, this is not it!
+                URI = requestURI;
+
+                // Pre-allocate unmanaged SafeArrays
+                Headers = new byte[incomingHeaders.Length];
+                Body = new byte[incomingBody.Length];
+
+                // Cache the PTR's
+                URIHandle = GCHandle.Alloc(URI, GCHandleType.Pinned);
+                HeadersHandle = GCHandle.Alloc(Headers, GCHandleType.Pinned);
+                BodyHandle = GCHandle.Alloc(Body, GCHandleType.Pinned);
+
+                // Copy from managed to the pre-allocated unmanaged arrays, blockcopy is fastest method
+                //  and an explicit copy is required to not invalidate the cached PTR's
+                Buffer.BlockCopy(incomingHeaders, 0, Headers, 0, incomingHeaders.Length);
+                Buffer.BlockCopy(incomingBody, 0, Body, 0, incomingBody.Length);
+            }
+
+            // IDisposable inheritance calls this dynamically to free unmanaged allocations on disposal of the parent object.
+            //  In cases of direct instantiation, you should still call this manually when data is no longer needed
+            public void Dispose()
+            {
+                // This is technically unneded due to fixed size allocation but retained for safety
+                if (URIHandle.IsAllocated) URIHandle.Free();
+                // Extremely IMPORTANT: Free the unmanaged array assignemnts on instance destruction to avoid memory leak
+                if (HeadersHandle.IsAllocated) HeadersHandle.Free();
+                if (BodyHandle.IsAllocated) BodyHandle.Free();
+            }
         };
 
 
@@ -53,9 +94,9 @@ namespace NKLI.DeDupeProxy
         //Watson DeDupe
         DedupeLibrary deDupe;
         static List<Chunk> Chunks;
-        static string Key = "kjv";
-        static List<string> Keys;
-        static byte[] Data;
+        //static string Key = "kjv";
+        //static List<string> Keys;
+        //static byte[] Data;
 
         static bool DebugDedupe = false;
         static bool DebugSql = false;
@@ -94,18 +135,18 @@ namespace NKLI.DeDupeProxy
             {
                 if (exception is ProxyHttpException phex)
                 {
-                    await writeToConsole(exception.Message + ": " + phex.InnerException?.Message + Environment.NewLine + exception.StackTrace, ConsoleColor.Red);
+                    await WriteToConsole(exception.Message + ": " + phex.InnerException?.Message + Environment.NewLine + exception.StackTrace, ConsoleColor.Red);
                     foreach (var pair in exception.Data)
                     {
-                        await writeToConsole(pair.ToString(), ConsoleColor.Red);
+                        await WriteToConsole(pair.ToString(), ConsoleColor.Red);
                     }
                 }
                 else
                 {
-                    await writeToConsole(exception.Message + Environment.NewLine + exception.StackTrace, ConsoleColor.Red);
+                    await WriteToConsole(exception.Message + Environment.NewLine + exception.StackTrace, ConsoleColor.Red);
                     foreach (var pair in exception.Data)
                     {
-                        await writeToConsole(pair.ToString(), ConsoleColor.Red);
+                        await WriteToConsole(pair.ToString(), ConsoleColor.Red);
                     }
                 }
             };
@@ -135,10 +176,8 @@ namespace NKLI.DeDupeProxy
 
 
             //Watson Cache: 1600 entries * 262144 max chunk size = Max 400Mb memory size
-            memoryCache = new LRUCache<string, byte[]>(1600, 100, false);
-            writeCache = new FIFOCache<string, byte[]>(1600, 100, false);
-
-
+            memoryCache = new LRUCache<string, byte[]>(1000, 100, false);
+            writeCache = new FIFOCache<string, byte[]>(1000, 100, false);
 
             //Watson DeDupe
             if (!Directory.Exists("Chunks")) Directory.CreateDirectory("Chunks");
@@ -184,7 +223,7 @@ namespace NKLI.DeDupeProxy
                         catch
                         {
                             decodeKey = null;
-                            await writeToConsole("<Titanium> Expectedly ran out of keys in write cache", ConsoleColor.Red);
+                            await WriteToConsole("<Titanium> Expectedly ran out of keys in write cache", ConsoleColor.Red);
                         }
 
                         if (writeCache.TryGet(decodeKey, out byte[] Chunk))
@@ -200,6 +239,7 @@ namespace NKLI.DeDupeProxy
                                 FileOptions.WriteThrough))
                             {
                                 fs.Write(Chunk, 0, Chunk.Length);
+                                fs.Dispose();
                             }
 
                             writeCache.Remove(decodeKey);
@@ -221,26 +261,32 @@ namespace NKLI.DeDupeProxy
 
                         try
                         {
-                            ObjectStruct chunkStruct = fromBytes(data);
+                            ObjectStruct chunkStruct = FromBytes<ObjectStruct>(data);
                             session.Flush();
 
                             try
                             {
                                 deDupe.StoreObject(chunkStruct.URI + "Body", chunkStruct.Body, out Chunks);
-                                deDupe.StoreObject(chunkStruct.URI + "Headers", chunkStruct.Headers, out Chunks);
+                                int chunkCount = Chunks.Count;
+                                int bodyLength = chunkStruct.Body.Length;
+                                string bodyURI = chunkStruct.URI;
+
                                 
+
+                                deDupe.StoreObject(chunkStruct.URI + "Headers", chunkStruct.Headers, out Chunks);
+
+                                if (deDupe.IndexStats(out NumObjects, out NumChunks, out LogicalBytes, out PhysicalBytes, out DedupeRatioX, out DedupeRatioPercent))
+                                    await WriteToConsole("<DeDupe> [Titanium] stored object Size:" + String.Format("{0:n2}", (bodyLength / 1024)) + "Kb Chunks:" + chunkCount + " URI:" + bodyURI + Environment.NewLine +
+                                                     "<DeDupe> [Objects:" + NumObjects + "]/[Chunks:" + NumChunks + "] - [Logical:" + String.Format("{0:n0}", (LogicalBytes / 1024)) + "Kb]/[Physical:" + String.Format("{0:n0}", (PhysicalBytes / 1024)) + "Kb] + [Ratio:" + Math.Round(DedupeRatioPercent, 4) + "%]", ConsoleColor.Yellow);
                             }
-                            catch { await writeToConsole("<Titanium> Dedupilication attempt failed, URI:" + chunkStruct.URI, ConsoleColor.Red); }
+                            catch { await WriteToConsole("<Titanium> Dedupilication attempt failed, URI:" + chunkStruct.URI, ConsoleColor.Red); }
 
-                            if (deDupe.IndexStats(out NumObjects, out NumChunks, out LogicalBytes, out PhysicalBytes, out DedupeRatioX, out DedupeRatioPercent))
-                                writeToConsole("<DeDupe> [Titanium] stored object Size:" + String.Format("{0:n2}", (chunkStruct.Body.Length / 1024)) + "Kb Chunks:" + Chunks.Count + " URI:" + chunkStruct.URI + Environment.NewLine +
-                                                 "<DeDupe> [Objects:" + NumObjects + "]/[Chunks:" + NumChunks + "] - [Logical:" + String.Format("{0:n0}", (LogicalBytes / 1024)) + "Kb]/[Physical:" + String.Format("{0:n0}", (PhysicalBytes / 1024)) + "Kb] + [Ratio:" + Math.Round(DedupeRatioPercent, 4) + "%]", ConsoleColor.Yellow);
-
+                            chunkStruct.Dispose();
                             //session.Flush();
                         }
                         catch (Exception err)
                         {
-                            await writeToConsole("Unhandled exception in thread." + err, ConsoleColor.Red);
+                            await WriteToConsole("Unhandled exception in thread." + err, ConsoleColor.Red);
                             continue;
                         }
                     }
@@ -266,9 +312,9 @@ namespace NKLI.DeDupeProxy
 
             RemotePort_Socks = socksProxyPort;
 
-            proxyServer.BeforeRequest += onRequest;
-            proxyServer.BeforeResponse += onResponse;
-            proxyServer.AfterResponse += onAfterResponse;
+            proxyServer.BeforeRequest += OnRequest;
+            proxyServer.BeforeResponse += OnResponse;
+            proxyServer.AfterResponse += OnAfterResponse;
 
             proxyServer.ServerCertificateValidationCallback += OnCertificateValidation;
             proxyServer.ClientCertificateSelectionCallback += OnCertificateSelection;
@@ -278,8 +324,8 @@ namespace NKLI.DeDupeProxy
             explicitEndPoint = new ExplicitProxyEndPoint(IPAddress.Any, listenPort);
 
             // Fired when a CONNECT request is received
-            explicitEndPoint.BeforeTunnelConnectRequest += onBeforeTunnelConnectRequest;
-            explicitEndPoint.BeforeTunnelConnectResponse += onBeforeTunnelConnectResponse;
+            explicitEndPoint.BeforeTunnelConnectRequest += OnBeforeTunnelConnectRequest;
+            explicitEndPoint.BeforeTunnelConnectResponse += OnBeforeTunnelConnectResponse;
 
             // An explicit endpoint is where the client knows about the existence of a proxy
             // So client sends request in a proxy friendly manner
@@ -337,7 +383,7 @@ namespace NKLI.DeDupeProxy
             }
 
             // Don't decrypt these domains
-            dontDecrypt = new List<string> { "plex.direct", "dropbox.com", "boxcryptor.com", "google.com" };
+            dontDecrypt = new List<string> { "plex.direct", "activity.windows.com", "dropbox.com", "boxcryptor.com", "google.com" };
 
             // Only explicit proxies can be set as system proxy!
             //proxyServer.SetAsSystemHttpProxy(explicitEndPoint);
@@ -350,11 +396,11 @@ namespace NKLI.DeDupeProxy
 
         public void Stop()
         {
-            explicitEndPoint.BeforeTunnelConnectRequest -= onBeforeTunnelConnectRequest;
-            explicitEndPoint.BeforeTunnelConnectResponse -= onBeforeTunnelConnectResponse;
+            explicitEndPoint.BeforeTunnelConnectRequest -= OnBeforeTunnelConnectRequest;
+            explicitEndPoint.BeforeTunnelConnectResponse -= OnBeforeTunnelConnectResponse;
 
-            proxyServer.BeforeRequest -= onRequest;
-            proxyServer.BeforeResponse -= onResponse;
+            proxyServer.BeforeRequest -= OnRequest;
+            proxyServer.BeforeResponse -= OnResponse;
             proxyServer.ServerCertificateValidationCallback -= OnCertificateValidation;
             proxyServer.ClientCertificateSelectionCallback -= OnCertificateSelection;
 
@@ -367,9 +413,9 @@ namespace NKLI.DeDupeProxy
             proxyServer.CertificateManager.RemoveTrustedRootCertificate();
         }
 
-        private async Task<IExternalProxy> onGetCustomUpStreamProxyFunc(SessionEventArgsBase arg)
+        private async Task<IExternalProxy> OnGetCustomUpStreamProxyFunc(SessionEventArgsBase arg)
         {
-            arg.GetState().PipelineInfo.AppendLine(nameof(onGetCustomUpStreamProxyFunc));
+            arg.GetState().PipelineInfo.AppendLine(nameof(OnGetCustomUpStreamProxyFunc));
 
             // this is just to show the functionality, provided values are junk
             return new ExternalProxy
@@ -384,9 +430,9 @@ namespace NKLI.DeDupeProxy
             };
         }
 
-        private async Task<IExternalProxy> onCustomUpStreamProxyFailureFunc(SessionEventArgsBase arg)
+        private async Task<IExternalProxy> OnCustomUpStreamProxyFailureFunc(SessionEventArgsBase arg)
         {
-            arg.GetState().PipelineInfo.AppendLine(nameof(onCustomUpStreamProxyFailureFunc));
+            arg.GetState().PipelineInfo.AppendLine(nameof(OnCustomUpStreamProxyFailureFunc));
 
             // this is just to show the functionality, provided values are junk
             return new ExternalProxy
@@ -401,11 +447,11 @@ namespace NKLI.DeDupeProxy
             };
         }
 
-        private async Task onBeforeTunnelConnectRequest(object sender, TunnelConnectSessionEventArgs e)
+        private async Task OnBeforeTunnelConnectRequest(object sender, TunnelConnectSessionEventArgs e)
         {
             string hostname = e.HttpClient.Request.RequestUri.Host;
-            e.GetState().PipelineInfo.AppendLine(nameof(onBeforeTunnelConnectRequest) + ":" + hostname);
-            await writeToConsole("Tunnel to: " + hostname);
+            e.GetState().PipelineInfo.AppendLine(nameof(OnBeforeTunnelConnectRequest) + ":" + hostname);
+            await WriteToConsole("Tunnel to: " + hostname);
 
             var clientLocalIp = e.ClientLocalEndPoint.Address;
             if (!clientLocalIp.Equals(IPAddress.Loopback) && !clientLocalIp.Equals(IPAddress.IPv6Loopback))
@@ -458,17 +504,17 @@ namespace NKLI.DeDupeProxy
             }
         }
 
-        private Task onBeforeTunnelConnectResponse(object sender, TunnelConnectSessionEventArgs e)
+        private Task OnBeforeTunnelConnectResponse(object sender, TunnelConnectSessionEventArgs e)
         {
-            e.GetState().PipelineInfo.AppendLine(nameof(onBeforeTunnelConnectResponse) + ":" + e.HttpClient.Request.RequestUri);
+            e.GetState().PipelineInfo.AppendLine(nameof(OnBeforeTunnelConnectResponse) + ":" + e.HttpClient.Request.RequestUri);
 
             return Task.CompletedTask;
         }
 
         // intercept & cancel redirect or update requests
-        private async Task onRequest(object sender, SessionEventArgs e)
+        private async Task OnRequest(object sender, SessionEventArgs e)
         {
-            e.GetState().PipelineInfo.AppendLine(nameof(onRequest) + ":" + e.HttpClient.Request.RequestUri);
+            e.GetState().PipelineInfo.AppendLine(nameof(OnRequest) + ":" + e.HttpClient.Request.RequestUri);
 
             var clientLocalIp = e.ClientLocalEndPoint.Address;
             if (!clientLocalIp.Equals(IPAddress.Loopback) && !clientLocalIp.Equals(IPAddress.IPv6Loopback))
@@ -481,8 +527,8 @@ namespace NKLI.DeDupeProxy
                 e.CustomUpStreamProxy = new ExternalProxy("localhost", 8888);
             }*/
 
-            await writeToConsole("Active Client Connections:" + ((ProxyServer)sender).ClientConnectionCount);
-            await writeToConsole(e.HttpClient.Request.Url);
+            await WriteToConsole("Active Client Connections:" + ((ProxyServer)sender).ClientConnectionCount);
+            await WriteToConsole(e.HttpClient.Request.Url);
 
             // store it in the UserData property
             // It can be a simple integer, Guid, or any type
@@ -511,47 +557,57 @@ namespace NKLI.DeDupeProxy
             {
                 try
                 {
-                    deDupe.RetrieveObject(e.HttpClient.Request.Url + "Headers", out byte[] headerData);
-
-                    // Convert byte[] back into dictionary
-                    MemoryStream mStream = new MemoryStream();
-                    BinaryFormatter binFormatter = new BinaryFormatter();
-                    mStream.Write(headerData, 0, headerData.Length);
-                    mStream.Position = 0;
-                    Dictionary<string, string> restoredHeader = binFormatter.Deserialize(mStream) as Dictionary<string, string>;
-
-                    // Complain if dictionary is unexpectedly empty
-                    if (restoredHeader.Count == 0)
+                    // We only reconstruct the stream after successful object retrieval
+                    if (deDupe.RetrieveObject(e.HttpClient.Request.Url + "Headers", out byte[] headerData))
                     {
-                        await writeToConsole("<Titanium> (onRequest) Cache deserialization resulted in 0 headers", ConsoleColor.Red);
+                        // Convert byte[] back into dictionary
+                        MemoryStream mStream = new MemoryStream();
+                        BinaryFormatter binFormatter = new BinaryFormatter();
+                        mStream.Write(headerData, 0, headerData.Length);
+                        mStream.Position = 0;
+                        Dictionary<string, string> restoredHeader = binFormatter.Deserialize(mStream) as Dictionary<string, string>;
+
+                        mStream.Dispose();
+
+                        // Complain if dictionary is unexpectedly empty
+                        if (restoredHeader.Count == 0)
+                        {
+                            await WriteToConsole("<Titanium> (onRequest) Cache deserialization resulted in 0 headers", ConsoleColor.Red);
+                        }
+                        else
+                        {
+                            // Convert dictionary into response format
+                            Dictionary<string, HttpHeader> headerDictionary = new Dictionary<string, HttpHeader>();
+                            foreach (var pair in restoredHeader)
+                            {
+                                //await writeToConsole("Key:" + pair.Key + " Value:" + pair.Value, ConsoleColor.Green);
+                                e.HttpClient.Response.Headers.AddHeader(new HttpHeader(pair.Key, pair.Value));
+                                headerDictionary.Add(pair.Key, new HttpHeader(pair.Key, pair.Value));
+                            }
+                            try
+                            {
+                                // Check matching body exists and retrive
+                                if (deDupe.ObjectExists(e.HttpClient.Request.Url + "Body"))
+                                {
+                                    deDupe.RetrieveObject(e.HttpClient.Request.Url + "Body", out byte[] objectData);
+                                    await WriteToConsole("<Titanium> found object, Size:" + objectData.Length + " URI:" + e.HttpClient.Request.Url, ConsoleColor.Cyan);
+
+                                    // Cancel request and respond cached data
+                                    try { e.Ok(objectData, headerDictionary); }
+                                    catch { await WriteToConsole("<Titanium> (onRequest) Failure while attempting to send recontructed request", ConsoleColor.Red); }
+                                }
+                            }
+                            catch { await WriteToConsole("<Titanium> (onRequest) Failure while attempting to restore cached object", ConsoleColor.Red); }
+                        }
                     }
+                    // In case of object retrieval failing, we wan't to remove it from the Index
                     else
                     {
-                        // Convert dictionary into response format
-                        Dictionary<string, HttpHeader> headerDictionary = new Dictionary<string, HttpHeader>();
-                        foreach (var pair in restoredHeader)
-                        {
-                            //await writeToConsole("Key:" + pair.Key + " Value:" + pair.Value, ConsoleColor.Green);
-                            e.HttpClient.Response.Headers.AddHeader(new HttpHeader(pair.Key, pair.Value));
-                            headerDictionary.Add(pair.Key, new HttpHeader(pair.Key, pair.Value));
-                        }
-                        try
-                        {
-                            // Check matching body exists and retrive
-                            if (deDupe.ObjectExists(e.HttpClient.Request.Url + "Body"))
-                            {
-                                await writeToConsole("<Titanium> found object, Size:" + " URI:" + e.HttpClient.Request.Url, ConsoleColor.Cyan);
-                                deDupe.RetrieveObject(e.HttpClient.Request.Url + "Body", out byte[] objectData);
-
-                                // Cancel request and respond cached data
-                                try { e.Ok(objectData, headerDictionary); }
-                                catch { await writeToConsole("<Titanium> (onRequest) Failure while attempting to send recontructed request", ConsoleColor.Red); }
-                            }
-                        }
-                        catch { await writeToConsole("<Titanium> (onRequest) Failure while attempting to restore cached object", ConsoleColor.Red); }
+                        deDupe.DeleteObject(e.HttpClient.Request.Url + "Headers");
+                        deDupe.DeleteObject(e.HttpClient.Request.Url + "Body");
                     }
                 }
-                catch { await writeToConsole("<Titanium> (onRequest) Failure while attempting to restore cached headers", ConsoleColor.Red); }
+                catch { await WriteToConsole("<Titanium> (onRequest) Failure while attempting to restore cached headers", ConsoleColor.Red); }
             }     
 
 
@@ -576,21 +632,21 @@ namespace NKLI.DeDupeProxy
         }
 
         // Modify response
-        private async Task multipartRequestPartSent(object sender, MultipartRequestPartSentEventArgs e)
+        private async Task MultipartRequestPartSent(object sender, MultipartRequestPartSentEventArgs e)
         {
-            e.GetState().PipelineInfo.AppendLine(nameof(multipartRequestPartSent));
+            e.GetState().PipelineInfo.AppendLine(nameof(MultipartRequestPartSent));
 
             var session = (SessionEventArgs)sender;
-            await writeToConsole("Multipart form data headers:");
+            await WriteToConsole("Multipart form data headers:");
             foreach (var header in e.Headers)
             {
-                await writeToConsole(header.ToString());
+                await WriteToConsole(header.ToString());
             }
         }
 
-        private async Task onResponse(object sender, SessionEventArgs e)
+        private async Task OnResponse(object sender, SessionEventArgs e)
         {
-            e.GetState().PipelineInfo.AppendLine(nameof(onResponse));
+            e.GetState().PipelineInfo.AppendLine(nameof(OnResponse));
 
             if (e.HttpClient.ConnectRequest?.TunnelType == TunnelType.Websocket)
             {
@@ -598,7 +654,7 @@ namespace NKLI.DeDupeProxy
                 e.DataReceived += WebSocket_DataReceived;
             }
 
-            await writeToConsole("Active Server Connections:" + ((ProxyServer)sender).ServerConnectionCount);
+            await WriteToConsole("Active Server Connections:" + ((ProxyServer)sender).ServerConnectionCount);
 
             //string ext = System.IO.Path.GetExtension(e.HttpClient.Request.RequestUri.AbsolutePath);
 
@@ -647,12 +703,12 @@ namespace NKLI.DeDupeProxy
                     }
                     catch
                     {
-                        await writeToConsole("<Titanium> (onResponse) Exception occured inspecting cache-control header", ConsoleColor.Red);
+                        await WriteToConsole("<Titanium> (onResponse) Exception occured inspecting cache-control header", ConsoleColor.Red);
                     }
 
                     if (cacheControl.Value.Contains("no-cache") || cacheControl.Value.Contains("no-store"))
                     {
-                        await writeToConsole("<DeDupe> [Titanium] Respecting no-cache header for key:" + Key, ConsoleColor.DarkYellow);
+                        await WriteToConsole("<DeDupe> [Titanium] Respecting no-cache header for key:" + Key, ConsoleColor.DarkYellow);
 
                         if (deDupe.ObjectExists(Key + "Body"))
                         {
@@ -666,46 +722,52 @@ namespace NKLI.DeDupeProxy
                         try
                         {
                             // For now we only want to avoid caching range-requests and put a max size on incoming objects
-                            if ((output.Count() == e.HttpClient.Response.ContentLength) && (maxObjectSizeHTTP > e.HttpClient.Response.ContentLength))
+                            if ((output.Count() == e.HttpClient.Response.ContentLength) && 
+                                (e.HttpClient.Response.ContentLength > 0) && 
+                                (maxObjectSizeHTTP > e.HttpClient.Response.ContentLength))
                             {
-                                //Struct for marshal transform
-                                ObjectStruct responseStruct = new ObjectStruct();
-
-
                                 // If no headers than don't even bother
                                 if (e.HttpClient.Response.Headers.Count() != 0)
                                 {
                                     // Serialize headers
                                     Dictionary<string, string> headerDictionary = new Dictionary<string, string>();
                                     IEnumerator<HttpHeader> headerEnumerator = e.HttpClient.Response.Headers.GetEnumerator();
-                                    while (headerEnumerator.MoveNext()) headerDictionary.Add(headerEnumerator.Current.Name, headerEnumerator.Current.Value);
+                                    while (headerEnumerator.MoveNext())
+                                    {
+                                        if (!headerDictionary.ContainsKey(headerEnumerator.Current.Name))
+                                            headerDictionary.Add(headerEnumerator.Current.Name, headerEnumerator.Current.Value);
+                                    }
                                     var binFormatter = new BinaryFormatter();
                                     var mStream = new MemoryStream();
                                     binFormatter.Serialize(mStream, headerDictionary);
 
-                                    responseStruct.Headers = mStream.ToArray();
-
                                     // Store response body in cache provided it's the expected length
                                     try
                                     {
-                                        responseStruct.URI = e.HttpClient.Request.Url;
-                                        responseStruct.Headers = mStream.ToArray();
-                                        responseStruct.Body = output;
+                                        ObjectStruct responseStruct = new ObjectStruct(e.HttpClient.Request.Url, mStream.ToArray(), output);
+                                        //{
+                                        //    URI = e.HttpClient.Request.Url,
+                                        //    Headers = mStream.ToArray(),
+                                        //    Body = output
+                                        //};
 
-                                        byte[] responseOutput = getBytes(responseStruct);
+                                        mStream.Dispose();
+
+                                        byte[] responseOutput = GetBytes(responseStruct);
+                                        responseStruct.Dispose();
 
                                         IPersistentQueueSession sessionQueue = chunkQueue.OpenSession();
                                         sessionQueue.Enqueue(responseOutput);
                                         sessionQueue.Flush();
                                     }
-                                    catch { await writeToConsole("<Titanium> Unable to write response body to cache", ConsoleColor.Red); }
+                                    catch { await WriteToConsole("<Titanium> Unable to write response body to cache", ConsoleColor.Red); }
                                 }
                             }
                         }
                         catch
                         {
                             //throw new Exception("Unable to output headers to cache");
-                            await writeToConsole("<DeDupe> (Titanium) Unable to output headers to cache", ConsoleColor.Red);
+                            await WriteToConsole("<DeDupe> (Titanium) Unable to output headers to cache", ConsoleColor.Red);
                         }
 
 
@@ -713,7 +775,7 @@ namespace NKLI.DeDupeProxy
                 }
                 catch
                 {
-                    await writeToConsole("<Titanium> (onResponse) Exception occured receiving response body", ConsoleColor.Red);
+                    await WriteToConsole("<Titanium> (onResponse) Exception occured receiving response body", ConsoleColor.Red);
                     //throw new Exception("<Titanium> (onResponse) Exception occured receiving response body");
                 }
 
@@ -728,9 +790,13 @@ namespace NKLI.DeDupeProxy
 
                 }*/
             }
+            else
+            {
+                await WriteToConsole("<Titanium> Skipping URL:" + e.HttpClient.Request.Url, ConsoleColor.Magenta);
+            }
         }
 
-        private async Task onAfterResponse(object sender, SessionEventArgs e)
+        private async Task OnAfterResponse(object sender, SessionEventArgs e)
         {
             // This is the massive console spam!
             //await writeToConsole($"Pipelineinfo: {e.GetState().PipelineInfo}", ConsoleColor.Magenta);
@@ -769,7 +835,7 @@ namespace NKLI.DeDupeProxy
             return Task.CompletedTask;
         }
 
-        private async Task writeToConsole(string message, ConsoleColor? consoleColor = null)
+        private async Task WriteToConsole(string message, ConsoleColor? consoleColor = null)
         {
             await @lock.WaitAsync();
 
@@ -824,13 +890,18 @@ namespace NKLI.DeDupeProxy
         }
         byte[] ReadChunk(string key)
         {
-            // Is possible return from memory
+            // Is possible return from memory, otherwise fetch from disk
             if (!memoryCache.TryGet(key, out byte[] data))
             {
-                byte[] readData = File.ReadAllBytes("Chunks\\" + key);
-                // Copy back read chunks to memory cache
-                memoryCache.AddReplace(Key, readData);
-                return readData;
+                // Returning null in case of file not found tells the calling function the object retrieval has failed
+                if (File.Exists("Chunks\\" + key))
+                {
+                    byte[] readData = File.ReadAllBytes("Chunks\\" + key);
+                    // Copy back read chunks to memory cache
+                    memoryCache.AddReplace(key, readData);
+                    return readData;
+                }
+                else return null;
             }
             else
             {
@@ -843,7 +914,7 @@ namespace NKLI.DeDupeProxy
             try
             {
                 // First delete from memory
-                memoryCache.Remove(key);
+                if (memoryCache.Contains(key)) memoryCache.Remove(key);
                 // Then delete from disk
                 File.Delete("Chunks\\" + key);
             }
@@ -858,53 +929,53 @@ namespace NKLI.DeDupeProxy
 
         //
         #region Struct-ByteArray Conversion
-        byte[] getBytes(ObjectStruct str)
+        public static byte[] GetBytes<T>(T str)
         {
             int size = Marshal.SizeOf(str);
+
             byte[] arr = new byte[size];
 
-            IntPtr ptr = Marshal.AllocHGlobal(size);
-            Marshal.StructureToPtr(str, ptr, false);
-            Marshal.Copy(ptr, arr, 0, size);
-            Marshal.FreeHGlobal(ptr);
+            GCHandle h = default(GCHandle);
+
+            try
+            {
+                h = GCHandle.Alloc(arr, GCHandleType.Pinned);
+
+                Marshal.StructureToPtr<T>(str, h.AddrOfPinnedObject(), true);
+            }
+            finally
+            {
+                if (h.IsAllocated)
+                {
+                    h.Free();
+                }
+            }
+
             return arr;
         }
 
-        ObjectStruct fromBytes(byte[] arr)
+        public static T FromBytes<T>(byte[] arr) where T : struct
         {
+            T str = default(T);
+
+            GCHandle h = default(GCHandle);
+
             try
             {
-                ObjectStruct str = new ObjectStruct();
+                h = GCHandle.Alloc(arr, GCHandleType.Pinned);
 
-                int size = Marshal.SizeOf(str);
-                IntPtr ptr = Marshal.AllocHGlobal(size);
+                str = Marshal.PtrToStructure<T>(h.AddrOfPinnedObject());
 
-                Marshal.Copy(arr, 0, ptr, size);
-
-                str = (ObjectStruct)Marshal.PtrToStructure(ptr, str.GetType());
-                Marshal.FreeHGlobal(ptr);
-
-                return str;
             }
-            catch (System.AccessViolationException)
+            finally
             {
-                Console.WriteLine("DeSuplication queue corrupt, recreating!");
-
-                chunkQueue.Dispose();
-
-                if (DeleteChildren("chunkQueue", true))
+                if (h.IsAllocated)
                 {
-                    chunkQueue = new PersistentQueue("chunkQueue");
+                    h.Free();
                 }
-                else
-                {
-                    Console.Write("Recreation of DeDuplication queue failed!");
-                }
-
-                return new ObjectStruct();
             }
 
-            
+            return str;
         }
         #endregion
         //
@@ -972,6 +1043,43 @@ namespace NKLI.DeDupeProxy
                 return false;
             }; //May need to add more exceptions to catch - DO NOT use a wildcard catch (e.g. Exception)
         }
+
+        #region IDisposable Support
+        private bool disposedValue = false; // To detect redundant calls
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!disposedValue)
+            {
+                if (disposing)
+                {
+                    // TODO: dispose managed state (managed objects).
+                    proxyServer.Dispose();
+                    @lock.Dispose();
+                }
+
+                // TODO: free unmanaged resources (unmanaged objects) and override a finalizer below.
+                // TODO: set large fields to null.
+
+                disposedValue = true;
+            }
+        }
+
+        // TODO: override a finalizer only if Dispose(bool disposing) above has code to free unmanaged resources.
+        // ~TitaniumController() {
+        //   // Do not change this code. Put cleanup code in Dispose(bool disposing) above.
+        //   Dispose(false);
+        // }
+
+        // This code added to correctly implement the disposable pattern.
+        public void Dispose()
+        {
+            // Do not change this code. Put cleanup code in Dispose(bool disposing) above.
+            Dispose(true);
+            // TODO: uncomment the following line if the finalizer is overridden above.
+            // GC.SuppressFinalize(this);
+        }
+        #endregion
 
     }
 

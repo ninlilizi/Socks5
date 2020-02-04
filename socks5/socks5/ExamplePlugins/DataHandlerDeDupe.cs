@@ -34,11 +34,11 @@ namespace socks5.ExamplePlugins
         DedupeLibrary Dedupe;
         static List<Chunk> Chunks;
         static string Key = "kjv";
-        static List<string> Keys;
-        static byte[] Data;
+        //static List<string> Keys;
+        //static byte[] Data;
 
-        static bool DebugDedupe = false;
-        static bool DebugSql = false;
+        static readonly bool DebugDedupe = false;
+        static readonly bool DebugSql = false;
         static ulong NumObjects;
         static ulong NumChunks;
         static ulong LogicalBytes;

@@ -20,9 +20,15 @@
     <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <LangVersion>default</LangVersion>
+    <Platforms>AnyCPU;x64</Platforms>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|netstandard2.0|AnyCPU'">
+    <CodeAnalysisRuleSet />
+    <DocumentationFile>C:\Code\Watson\WatsonDedupe-1.4\DedupeLibrary\DedupeLibrary.xml</DocumentationFile>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|netstandard2.0|x64'">
     <CodeAnalysisRuleSet />
     <DocumentationFile>C:\Code\Watson\WatsonDedupe-1.4\DedupeLibrary\DedupeLibrary.xml</DocumentationFile>
   </PropertyGroup>
@@ -32,8 +38,17 @@
     <DocumentationFile>C:\Code\Watson\WatsonDedupe-1.4\DedupeLibrary\DedupeLibrary.xml</DocumentationFile>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|netstandard2.0|x64'">
+    <CodeAnalysisRuleSet />
+    <DocumentationFile>C:\Code\Watson\WatsonDedupe-1.4\DedupeLibrary\DedupeLibrary.xml</DocumentationFile>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net46|AnyCPU'">
     <DefineConstants>DEBUG;TRACE</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net46|x64'">
+    <DefineConstants>TRACE</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

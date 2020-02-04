@@ -52,7 +52,7 @@ namespace NKLISocksClient
             if (RunTime.IsWindows)
             {
                 // fix console hang due to QuickEdit mode
-                NKLI.DeDupeProxy.ConsoleHelper.DisableQuickEditMode();
+                //NKLI.DeDupeProxy.NativeMethods.DisableQuickEditMode();
             }
 
             // Start proxy controller

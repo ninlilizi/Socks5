@@ -526,8 +526,16 @@ namespace WatsonDedupe
             long contentLength = 0;
             Stream stream = null;
             bool success = RetrieveObject(objectName, Callbacks, out contentLength, out stream);
-            data = DedupeCommon.StreamToBytes(stream);
-            return success; 
+            if (stream.Length == 0)
+            {
+                data = new byte[0];
+                return false;
+            }
+            else
+            {
+                data = DedupeCommon.StreamToBytes(stream);
+                return success;
+            }
         }
 
         /// <summary>
