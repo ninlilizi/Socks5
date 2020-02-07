@@ -34,61 +34,62 @@ namespace NKLI.DeDupeProxy
 
         public static IPersistentQueue chunkQueue;
 
-        // The struct between worlds. Functional window in the sandbox
-        [StructLayout(LayoutKind.Sequential)]
-        struct ObjectStruct : IDisposable
+        struct ObjectStruct
         {
-            // None array members must be defined as fixed size to C++ handling constraints
-            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
             public string URI;
-            // SafeArray is a magic member that allows for non-fixed size assignments during marshal operations but
-            //  needs marshal operations but needs special handling to avoid memory leak or illegal access exceptions
-            [MarshalAs(UnmanagedType.SafeArray)]
             public byte[] Headers;
-            [MarshalAs(UnmanagedType.SafeArray)]
             public byte[] Body;
 
-            private GCHandle URIHandle;
-            private GCHandle HeadersHandle;
-            private GCHandle BodyHandle;
+            public byte[] packed;
 
-            public ObjectStruct(string requestURI, byte[] incomingHeaders, byte[] incomingBody)
+            public void PackStruct(string requestURI, byte[] incomingHeaders, byte[] incomingBody)
             {
-                //URI = new string((char*)256); -- unsafe, fixed sized, unmanaged c++ assignment
-                //  There are situations where you might need to do the above, this is not it!
                 URI = requestURI;
+                
+                int packedlength = 12 + requestURI.Length + incomingHeaders.Length + incomingBody.Length;
 
-                // Pre-allocate unmanaged SafeArrays
-                Headers = new byte[incomingHeaders.Length];
-                Body = new byte[incomingBody.Length];
+                packed = new byte[packedlength];
 
-                // Cache the PTR's
-                URIHandle = GCHandle.Alloc(URI, GCHandleType.Pinned);
-                HeadersHandle = GCHandle.Alloc(Headers, GCHandleType.Pinned);
-                BodyHandle = GCHandle.Alloc(Body, GCHandleType.Pinned);
+                packed[0] = (byte)requestURI.Length;
+                packed[1] = (byte)(requestURI.Length >> 8);
+                packed[2] = (byte)(requestURI.Length >> 0x10);
+                packed[3] = (byte)(requestURI.Length >> 0x18);
 
-                // Copy from managed to the pre-allocated unmanaged arrays, blockcopy is fastest method
-                //  and an explicit copy is required to not invalidate the cached PTR's
-                Buffer.BlockCopy(incomingHeaders, 0, Headers, 0, incomingHeaders.Length);
-                Buffer.BlockCopy(incomingBody, 0, Body, 0, incomingBody.Length);
+                packed[4] = (byte)incomingHeaders.Length;
+                packed[5] = (byte)(incomingHeaders.Length >> 8);
+                packed[6] = (byte)(incomingHeaders.Length >> 0x10);
+                packed[7] = (byte)(incomingHeaders.Length >> 0x18);
+
+                packed[8] = (byte)incomingBody.Length;
+                packed[9] = (byte)(incomingBody.Length >> 8);
+                packed[10] = (byte)(incomingBody.Length >> 0x10);
+                packed[11] = (byte)(incomingBody.Length >> 0x18);
+
+                Buffer.BlockCopy(Encoding.UTF8.GetBytes(URI), 0, packed, 12, requestURI.Length);
+                Buffer.BlockCopy(incomingHeaders, 0, packed, 12 + requestURI.Length, incomingHeaders.Length);
+                Buffer.BlockCopy(incomingBody, 0, packed, 12 + requestURI.Length + incomingHeaders.Length, incomingBody.Length);
             }
 
-            // IDisposable inheritance calls this dynamically to free unmanaged allocations on disposal of the parent object.
-            //  In cases of direct instantiation, you should still call this manually when data is no longer needed
-            public void Dispose()
+            public void UnPackStruct(byte[] packed)
             {
-                // This is technically unneded due to fixed size allocation but retained for safety
-                if (URIHandle.IsAllocated) URIHandle.Free();
-                // Extremely IMPORTANT: Free the unmanaged array assignemnts on instance destruction to avoid memory leak
-                if (HeadersHandle.IsAllocated) HeadersHandle.Free();
-                if (BodyHandle.IsAllocated) BodyHandle.Free();
+                int URILength = BitConverter.ToInt32(packed, 0);
+                int HeaderLength = BitConverter.ToInt32(packed, 4);
+                int BodyLength = BitConverter.ToInt32(packed, 8);
+
+                Headers = new byte[HeaderLength];
+                Body = new byte[BodyLength];
+
+                URI = Encoding.UTF8.GetString(packed, 12, URILength);
+
+                Buffer.BlockCopy(packed, 12 + URILength, Headers, 0, HeaderLength);
+                Buffer.BlockCopy(packed, 12 + URILength + HeaderLength, Body, 0, BodyLength);
             }
         };
 
 
         // Watson DeDupe
         LRUCache<string, byte[]> memoryCache;
-        FIFOCache<string, byte[]> writeCache;
+        //FIFOCache<string, byte[]> writeCache;
         //END
 
         //Watson DeDupe
@@ -177,7 +178,7 @@ namespace NKLI.DeDupeProxy
 
             //Watson Cache: 1600 entries * 262144 max chunk size = Max 400Mb memory size
             memoryCache = new LRUCache<string, byte[]>(1000, 100, false);
-            writeCache = new FIFOCache<string, byte[]>(1000, 100, false);
+            //writeCache = new FIFOCache<string, byte[]>(1000, 100, false);
 
             //Watson DeDupe
             if (!Directory.Exists("Chunks")) Directory.CreateDirectory("Chunks");
@@ -209,7 +210,7 @@ namespace NKLI.DeDupeProxy
         public void StartProxy(int listenPort, bool useSocksRelay, int socksProxyPort)
         {
             // THREAD - Disk write queue
-            var threadWriteChunks = new Thread(async () =>
+            /*var threadWriteChunks = new Thread(async () =>
             {
                 string decodeKey;
                 while (true)
@@ -248,7 +249,7 @@ namespace NKLI.DeDupeProxy
                     }
                     Thread.Sleep(500);
                 }
-            } );
+            } );*/
 
             // THREAD - Deduplication queue
             var threadDeDupe = new Thread(async () => {
@@ -259,9 +260,11 @@ namespace NKLI.DeDupeProxy
                         var data = session.Dequeue();
                         if (data == null) { Thread.Sleep(500); continue; }
 
+                        // First decode request from queue
                         try
                         {
-                            ObjectStruct chunkStruct = FromBytes<ObjectStruct>(data);
+                            ObjectStruct chunkStruct = new ObjectStruct();
+                            chunkStruct.UnPackStruct(data);
                             session.Flush();
 
                             try
@@ -269,9 +272,7 @@ namespace NKLI.DeDupeProxy
                                 deDupe.StoreObject(chunkStruct.URI + "Body", chunkStruct.Body, out Chunks);
                                 int chunkCount = Chunks.Count;
                                 int bodyLength = chunkStruct.Body.Length;
-                                string bodyURI = chunkStruct.URI;
-
-                                
+                                string bodyURI = chunkStruct.URI;                              
 
                                 deDupe.StoreObject(chunkStruct.URI + "Headers", chunkStruct.Headers, out Chunks);
 
@@ -281,7 +282,6 @@ namespace NKLI.DeDupeProxy
                             }
                             catch { await WriteToConsole("<Titanium> Dedupilication attempt failed, URI:" + chunkStruct.URI, ConsoleColor.Red); }
 
-                            chunkStruct.Dispose();
                             //session.Flush();
                         }
                         catch (Exception err)
@@ -289,6 +289,8 @@ namespace NKLI.DeDupeProxy
                             await WriteToConsole("Unhandled exception in thread." + err, ConsoleColor.Red);
                             continue;
                         }
+
+                        // Then write chunks to disk
                     }
                 }
             });
@@ -298,9 +300,9 @@ namespace NKLI.DeDupeProxy
             chunkQueue = new PersistentQueue("chunkQueue");
             chunkQueue.Internals.ParanoidFlushing = false;
 
-            threadWriteChunks.Priority = ThreadPriority.BelowNormal;
-            threadWriteChunks.IsBackground = true;
-            threadWriteChunks.Start();
+            //threadWriteChunks.Priority = ThreadPriority.BelowNormal;
+            //threadWriteChunks.IsBackground = true;
+            //threadWriteChunks.Start();
 
             threadDeDupe.Priority = ThreadPriority.Lowest;
             threadDeDupe.IsBackground = true;
@@ -744,20 +746,12 @@ namespace NKLI.DeDupeProxy
                                     // Store response body in cache provided it's the expected length
                                     try
                                     {
-                                        ObjectStruct responseStruct = new ObjectStruct(e.HttpClient.Request.Url, mStream.ToArray(), output);
-                                        //{
-                                        //    URI = e.HttpClient.Request.Url,
-                                        //    Headers = mStream.ToArray(),
-                                        //    Body = output
-                                        //};
-
+                                        ObjectStruct responseStruct = new ObjectStruct();
+                                        responseStruct.PackStruct(e.HttpClient.Request.Url, mStream.ToArray(), output);
                                         mStream.Dispose();
 
-                                        byte[] responseOutput = GetBytes(responseStruct);
-                                        responseStruct.Dispose();
-
                                         IPersistentQueueSession sessionQueue = chunkQueue.OpenSession();
-                                        sessionQueue.Enqueue(responseOutput);
+                                        sessionQueue.Enqueue(responseStruct.packed);
                                         sessionQueue.Flush();
                                     }
                                     catch { await WriteToConsole("<Titanium> Unable to write response body to cache", ConsoleColor.Red); }
@@ -877,15 +871,39 @@ namespace NKLI.DeDupeProxy
             // First commit to memory cache
             try
             {
-                writeCache.AddReplace(data.Key, data.Value);
+                //writeCache.AddReplace(data.Key, data.Value);
                 memoryCache.AddReplace(data.Key, data.Value);
             }
             catch
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("<Titanium> ERROR writing to memory cache");
+                Console.WriteLine("<Titanium> ERROR writing to memory cache, Key:" + data.Key);
                 Console.ForegroundColor = ConsoleColor.White;
             }
+
+            // Then write to disk
+            try
+            {
+                File.WriteAllBytes("Chunks\\" + data.Key, data.Value);
+                using (var fs = new FileStream(
+                    "Chunks\\" + data.Key,
+                    FileMode.Create,
+                    FileAccess.Write,
+                    FileShare.None,
+                    0x1000,
+                    FileOptions.WriteThrough))
+                {
+                    fs.Write(data.Value, 0, data.Value.Length);
+                    //fs.Dispose();
+                }
+            }
+            catch
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("<Titanium> ERROR writing to disk cache, Key:" + data.Key);
+                Console.ForegroundColor = ConsoleColor.White;
+            }
+
             return true;
         }
         byte[] ReadChunk(string key)
@@ -926,59 +944,6 @@ namespace NKLI.DeDupeProxy
         }
         #endregion
         //END
-
-        //
-        #region Struct-ByteArray Conversion
-        public static byte[] GetBytes<T>(T str)
-        {
-            int size = Marshal.SizeOf(str);
-
-            byte[] arr = new byte[size];
-
-            GCHandle h = default(GCHandle);
-
-            try
-            {
-                h = GCHandle.Alloc(arr, GCHandleType.Pinned);
-
-                Marshal.StructureToPtr<T>(str, h.AddrOfPinnedObject(), true);
-            }
-            finally
-            {
-                if (h.IsAllocated)
-                {
-                    h.Free();
-                }
-            }
-
-            return arr;
-        }
-
-        public static T FromBytes<T>(byte[] arr) where T : struct
-        {
-            T str = default(T);
-
-            GCHandle h = default(GCHandle);
-
-            try
-            {
-                h = GCHandle.Alloc(arr, GCHandleType.Pinned);
-
-                str = Marshal.PtrToStructure<T>(h.AddrOfPinnedObject());
-
-            }
-            finally
-            {
-                if (h.IsAllocated)
-                {
-                    h.Free();
-                }
-            }
-
-            return str;
-        }
-        #endregion
-        //
 
         static bool DeleteChildren(string directory, bool recursive)
         {
