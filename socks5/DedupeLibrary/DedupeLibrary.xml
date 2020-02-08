@@ -165,6 +165,25 @@
             <param name="chunks">Chunks.</param>
             <returns>True if successful.</returns>
         </member>
+        <member name="M:WatsonDedupe.Database.DbProvider.GetChunksForRange(System.String,System.Int64,System.Int64,System.Collections.Generic.List{WatsonDedupe.Chunk}@)">
+            <summary>
+            Retrieve chunks containing data within a range of bytes from the original object.
+            </summary>
+            <param name="name">Object name.</param>
+            <param name="start">Starting range.</param>
+            <param name="end">Ending range.</param>
+            <param name="chunks">Chunks.</param>
+            <returns>True if successful.</returns>
+        </member>
+        <member name="M:WatsonDedupe.Database.DbProvider.GetChunkForPosition(System.String,System.Int64,WatsonDedupe.Chunk@)">
+            <summary>
+            Retrieve the chunk containing data for a given address within the original object.
+            </summary>
+            <param name="name">Object name.</param>
+            <param name="start">Starting range.</param>
+            <param name="chunk">Chunk.</param>
+            <returns>True if successful.</returns>
+        </member>
         <member name="M:WatsonDedupe.Database.DbProvider.DeleteObjectChunks(System.String,System.Collections.Generic.List{System.String}@)">
             <summary>
             Delete an object and dereference the associated chunks.
@@ -287,6 +306,25 @@
             </summary>
             <param name="name">The name of the object.</param>
             <param name="chunks">Chunks associated with the object.</param>
+            <returns>True if successful.</returns>
+        </member>
+        <member name="M:WatsonDedupe.Database.SqliteProvider.GetChunksForRange(System.String,System.Int64,System.Int64,System.Collections.Generic.List{WatsonDedupe.Chunk}@)">
+            <summary>
+            Retrieve chunks containing data within a range of bytes from the original object.
+            </summary>
+            <param name="name">Object name.</param>
+            <param name="start">Starting range.</param>
+            <param name="end">Ending range.</param>
+            <param name="chunks">Chunks.</param>
+            <returns>True if successful.</returns>
+        </member>
+        <member name="M:WatsonDedupe.Database.SqliteProvider.GetChunkForPosition(System.String,System.Int64,WatsonDedupe.Chunk@)">
+            <summary>
+            Retrieve the chunk containing data for a given address within the original object.
+            </summary>
+            <param name="name">Object name.</param>
+            <param name="start">Starting range.</param>
+            <param name="chunk">Chunk.</param>
             <returns>True if successful.</returns>
         </member>
         <member name="M:WatsonDedupe.Database.SqliteProvider.DeleteObjectChunks(System.String,System.Collections.Generic.List{System.String}@)">
@@ -547,6 +585,23 @@
             <param name="stream">The stream containing the data.</param>
             <returns>True if successful.</returns>
         </member>
+        <member name="M:WatsonDedupe.DedupeLibrary.RetrieveObjectStream(System.String,WatsonDedupe.DedupeStream@)">
+            <summary>
+            Retrieve a read-only stream over an object that has been stored.
+            </summary>
+            <param name="objectName">The name of the object.</param>
+            <param name="stream">Read-only stream.</param>
+            <returns>True if successful.</returns>
+        </member>
+        <member name="M:WatsonDedupe.DedupeLibrary.RetrieveObjectStream(System.String,WatsonDedupe.CallbackMethods,WatsonDedupe.DedupeStream@)">
+            <summary>
+            Retrieve a read-only stream over an object that has been stored.
+            </summary>
+            <param name="objectName">The name of the object.</param>
+            <param name="callbacks">CallbackMethods object containing callback methods.</param>
+            <param name="stream">Read-only stream.</param>
+            <returns>True if successful.</returns>
+        </member>
         <member name="M:WatsonDedupe.DedupeLibrary.DeleteObject(System.String)">
             <summary>
             Delete an object stored in the deduplication index.
@@ -608,6 +663,73 @@
             </summary>
             <param name="md">Object metadata.</param>
             <returns>True if successful.</returns>
+        </member>
+        <member name="T:WatsonDedupe.DedupeStream">
+            <summary>
+            A read-only stream over a deduplicated object.
+            </summary>
+        </member>
+        <member name="P:WatsonDedupe.DedupeStream.CanRead">
+            <summary>
+            Indicates if the stream allows read operations.
+            </summary>
+        </member>
+        <member name="P:WatsonDedupe.DedupeStream.CanSeek">
+            <summary>
+            Indicates if the stream allows seek operations.
+            </summary>
+        </member>
+        <member name="P:WatsonDedupe.DedupeStream.CanWrite">
+            <summary>
+            Indicates if the stream allows write operations.
+            </summary>
+        </member>
+        <member name="P:WatsonDedupe.DedupeStream.Length">
+            <summary>
+            Indicates the length of the content contained within the stream.
+            </summary>
+        </member>
+        <member name="P:WatsonDedupe.DedupeStream.Position">
+            <summary>
+            Indicates the current position within the stream.
+            </summary>
+        </member>
+        <member name="M:WatsonDedupe.DedupeStream.Flush">
+            <summary>
+            Not supported.  This method will throw a NotSupportedException.
+            </summary>
+        </member>
+        <member name="M:WatsonDedupe.DedupeStream.Read(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Read data from the stream into the specified buffer and increment the stream position.
+            </summary>
+            <param name="buffer">Byte array to use as a buffer.</param>
+            <param name="offset">The offset within the buffer indicating where to copy the read data.</param>
+            <param name="count">The number of bytes to populate within the buffer.</param>
+            <returns>An integer representing the number of bytes read.</returns>
+        </member>
+        <member name="M:WatsonDedupe.DedupeStream.Seek(System.Int64,System.IO.SeekOrigin)">
+            <summary>
+            Seek to the specified position within the stream.
+            </summary>
+            <param name="offset">Offset.</param>
+            <param name="origin">SeekOrigin.</param>
+            <returns>New position.</returns>
+        </member>
+        <member name="M:WatsonDedupe.DedupeStream.SetLength(System.Int64)">
+            <summary>
+            Not supported.  This method will throw a NotSupportedException.
+            Set the length of the stream.
+            </summary>
+            <param name="value">Length.</param>
+        </member>
+        <member name="M:WatsonDedupe.DedupeStream.Write(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Not supported.  This method will throw a NotSupportedException.
+            </summary>
+            <param name="buffer">Byte array.</param>
+            <param name="offset">Offset.</param>
+            <param name="count">Number of bytes.</param>
         </member>
         <member name="T:WatsonDedupe.ObjectMetadata">
             <summary>

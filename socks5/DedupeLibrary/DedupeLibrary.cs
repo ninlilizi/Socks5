@@ -254,7 +254,12 @@ namespace WatsonDedupe
         /// <returns>True if successful.</returns>
         public bool StoreObject(string objectName, byte[] data, out List<Chunk> chunks)
         {
-            if (data == null || data.Length < 1) throw new ArgumentNullException(nameof(data));
+            //if (data == null || data.Length < 1) throw new ArgumentNullException(nameof(data));
+            if (data == null || data.Length < 1)
+            {
+                chunks = new List<Chunk>();
+                return false;
+            }
             return StoreObject(objectName, Callbacks, data.Length, DedupeCommon.BytesToStream(data), out chunks);
         }
 

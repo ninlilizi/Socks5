@@ -18,6 +18,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NKLIProxyClient", "NKLIProx
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NKLIProxyServer", "NKLIProxyServer\NKLIProxyServer.csproj", "{FDA80FB5-3A2F-4D04-BAF7-113DB5A11B62}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SJP.DiskCache", "SJP.DiskCache\SJP.DiskCache.csproj", "{29D41482-9B49-49CB-A12F-29AC22E8AE34}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -48,6 +50,10 @@ Global
 		{FDA80FB5-3A2F-4D04-BAF7-113DB5A11B62}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{FDA80FB5-3A2F-4D04-BAF7-113DB5A11B62}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{FDA80FB5-3A2F-4D04-BAF7-113DB5A11B62}.Release|Any CPU.Build.0 = Release|Any CPU
+		{29D41482-9B49-49CB-A12F-29AC22E8AE34}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{29D41482-9B49-49CB-A12F-29AC22E8AE34}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{29D41482-9B49-49CB-A12F-29AC22E8AE34}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{29D41482-9B49-49CB-A12F-29AC22E8AE34}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

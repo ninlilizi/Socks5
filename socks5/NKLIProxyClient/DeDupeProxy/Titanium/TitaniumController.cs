@@ -19,6 +19,8 @@ using Titanium.Web.Proxy.Http;
 using Titanium.Web.Proxy.Models;
 using Titanium.Web.Proxy.StreamExtended.Network;
 using WatsonDedupe;
+using Noemax.Compression;
+using SJP.DiskCache;
 
 namespace NKLI.DeDupeProxy
 {
@@ -32,6 +34,18 @@ namespace NKLI.DeDupeProxy
 
         public static List<string> dontDecrypt;
 
+        
+
+        // Chunk cache
+        DirectoryInfo chunkCacheDir = new DirectoryInfo(@"chunkCache");   // where to store the cache
+        LfuCachePolicy<string> chunkCachePolicy = new LfuCachePolicy<string>();      // using an LRU cache policy
+        const long chunkCacheUnitSize = 1024L * 1024L * 1024L * 1024L; // 1GB
+        const long chunkCacheMaxSize = chunkCacheUnitSize * 10L; // 10GB
+        TimeSpan chunkCachePollingInterval = TimeSpan.FromMinutes(1);
+        DiskCache<string> chunkCache;
+        //
+
+        // Chunk encoding queue
         public static IPersistentQueue chunkQueue;
 
         struct ObjectStruct
@@ -85,19 +99,20 @@ namespace NKLI.DeDupeProxy
                 Buffer.BlockCopy(packed, 12 + URILength + HeaderLength, Body, 0, BodyLength);
             }
         };
-
+        //
 
         // Watson DeDupe
         LRUCache<string, byte[]> memoryCache;
-        //FIFOCache<string, byte[]> writeCache;
-        //END
-
+        
         //Watson DeDupe
         DedupeLibrary deDupe;
         static List<Chunk> Chunks;
         //static string Key = "kjv";
         //static List<string> Keys;
         //static byte[] Data;
+        const int deDupeMinChunkSize = 32768;
+        const int deDupeMaxChunkSize = 262144;
+        const int deDupeMaxMemoryCacheItems = 1000;
 
         static bool DebugDedupe = false;
         static bool DebugSql = false;
@@ -112,6 +127,8 @@ namespace NKLI.DeDupeProxy
 
         public TitaniumController()
         {
+
+
             proxyServer = new ProxyServer();
 
             // Setup Root certificates for machine
@@ -123,6 +140,11 @@ namespace NKLI.DeDupeProxy
             // Certificate trust is required to avoid host authentication errors!
             proxyServer.CertificateManager.TrustRootCertificate(true);
             proxyServer.CertificateManager.TrustRootCertificateAsAdmin(true);
+
+            // Database storage
+            if (!Directory.Exists("dbs")) Directory.CreateDirectory("dbs");
+            // Required for certificate storage
+            if (!Directory.Exists("crts")) Directory.CreateDirectory("crts");
 
 
             proxyServer.EnableHttp2 = true;
@@ -174,29 +196,35 @@ namespace NKLI.DeDupeProxy
             //proxyServer.CertificateManager.RootCertificate = new X509Certificate2("myCert.pfx", string.Empty, X509KeyStorageFlags.Exportable);
 
 
-
+            // Initialise chunk cache
+            Console.WriteLine("<Titanium> Max disk cache, " + String.Format("{0:n0}", (chunkCacheMaxSize / 1024 / 1024)) + "Mb");
+            if (!Directory.Exists(chunkCacheDir.Name)) Directory.CreateDirectory(chunkCacheDir.Name);
+            chunkCache = new DiskCache<string>(chunkCacheDir, chunkCachePolicy, chunkCacheMaxSize, chunkCachePollingInterval);
+            Console.WriteLine("BOOP!");
 
             //Watson Cache: 1600 entries * 262144 max chunk size = Max 400Mb memory size
-            memoryCache = new LRUCache<string, byte[]>(1000, 100, false);
+            Console.WriteLine("<Titanium> Max memory cache, " + String.Format("{0:n0}", ((deDupeMaxChunkSize * deDupeMaxMemoryCacheItems) / 1024 / 1024)) + "Mb");
+            memoryCache = new LRUCache<string, byte[]>(deDupeMaxMemoryCacheItems, 100, false);
             //writeCache = new FIFOCache<string, byte[]>(1000, 100, false);
 
             //Watson DeDupe
-            if (!Directory.Exists("Chunks")) Directory.CreateDirectory("Chunks");
-            if (File.Exists("Test.db"))
+            //if (!Directory.Exists("Chunks")) Directory.CreateDirectory("Chunks");
+            int maxSizeMB = 500;
+            maxObjectSizeHTTP = maxSizeMB * 1024 * 1024;
+            Console.Write("<Titanium> Maximum supported HTTP object, " + (Int32.MaxValue / 1024 / 1024) + "Mb / Maximum cached HTTP object, " + (maxObjectSizeHTTP / 1024 / 1024) + "Mb" + Environment.NewLine);
+
+
+            if (File.Exists("dbs/dedupe.db"))
             {
-                deDupe = new DedupeLibrary("Test.db", WriteChunk, ReadChunk, DeleteChunk, DebugDedupe, DebugSql);
+                deDupe = new DedupeLibrary("dbs/dedupe.db", WriteChunk, ReadChunk, DeleteChunk, DebugDedupe, DebugSql);
             }
             else
             {
-                deDupe = new DedupeLibrary("Test.db", 32768, 262144, 32768, 2, WriteChunk, ReadChunk, DeleteChunk, DebugDedupe, DebugSql);
+                deDupe = new DedupeLibrary("dbs/dedupe.db", deDupeMinChunkSize, deDupeMaxChunkSize, deDupeMinChunkSize, 2, WriteChunk, ReadChunk, DeleteChunk, DebugDedupe, DebugSql);
             }
 
             Console.Write(Environment.NewLine + "-------------------------" + Environment.NewLine + "DeDupe Engine Initialized" + Environment.NewLine + "-------------------------" + Environment.NewLine);
-
-            int maxSizeMB = 50;
-            maxObjectSizeHTTP = maxSizeMB * 1024 * 1024;
-            Console.Write("<DeDupe> Maximum system supported HTTP object size:" + (Int32.MaxValue / 1024 / 1024) + "Mb / Maximum HTTP object size:" + (maxObjectSizeHTTP / 1024 / 1024) + "Mb" + Environment.NewLine);
-
+            
             // Gather index and dedupe stats
             if (deDupe.IndexStats(out NumObjects, out NumChunks, out LogicalBytes, out PhysicalBytes, out DedupeRatioX, out DedupeRatioPercent))
             {
@@ -296,9 +324,9 @@ namespace NKLI.DeDupeProxy
             });
 
             // We prepare the DeDuplication queue before starting the worker threads
-            if (File.Exists("chunkQueue//lock")) DeleteChildren("chunkQueue", true);
+            //if (File.Exists("chunkQueue//lock")) DeleteChildren("chunkQueue", true);
             chunkQueue = new PersistentQueue("chunkQueue");
-            chunkQueue.Internals.ParanoidFlushing = false;
+            chunkQueue.Internals.ParanoidFlushing = true;
 
             //threadWriteChunks.Priority = ThreadPriority.BelowNormal;
             //threadWriteChunks.IsBackground = true;
@@ -307,10 +335,6 @@ namespace NKLI.DeDupeProxy
             threadDeDupe.Priority = ThreadPriority.Lowest;
             threadDeDupe.IsBackground = true;
             threadDeDupe.Start();
-
-            // Required for certificate storage
-            if (!Directory.Exists("crts")) Directory.CreateDirectory("crts");
-
 
             RemotePort_Socks = socksProxyPort;
 
@@ -407,9 +431,11 @@ namespace NKLI.DeDupeProxy
             proxyServer.ClientCertificateSelectionCallback -= OnCertificateSelection;
 
             proxyServer.Stop();
+            proxyServer.CertificateManager.Dispose();
+            proxyServer.Dispose();
 
             chunkQueue.Dispose();
-            DeleteChildren("chunkQueue", true);
+            //DeleteChildren("chunkQueue", true);
 
             // remove the generated certificates
             proxyServer.CertificateManager.RemoveTrustedRootCertificate();
@@ -595,7 +621,11 @@ namespace NKLI.DeDupeProxy
                                     await WriteToConsole("<Titanium> found object, Size:" + objectData.Length + " URI:" + e.HttpClient.Request.Url, ConsoleColor.Cyan);
 
                                     // Cancel request and respond cached data
-                                    try { e.Ok(objectData, headerDictionary); }
+                                    try
+                                    {
+                                        e.Ok(objectData, headerDictionary);
+                                        e.TerminateServerConnection();
+                                    }
                                     catch { await WriteToConsole("<Titanium> (onRequest) Failure while attempting to send recontructed request", ConsoleColor.Red); }
                                 }
                             }
@@ -871,8 +901,7 @@ namespace NKLI.DeDupeProxy
             // First commit to memory cache
             try
             {
-                //writeCache.AddReplace(data.Key, data.Value);
-                memoryCache.AddReplace(data.Key, data.Value);
+                //memoryCache.AddReplace(data.Key, data.Value);
             }
             catch
             {
@@ -881,8 +910,13 @@ namespace NKLI.DeDupeProxy
                 Console.ForegroundColor = ConsoleColor.White;
             }
 
+            // Next compress & write to disk cache
+            Stream chunkStream = new MemoryStream(CompressionFactory.Lzf4.Compress(data.Value, 3));
+            chunkCache.SetValue(data.Key, chunkStream);
+            chunkStream.Dispose();
+
             // Then write to disk
-            try
+            /*try
             {
                 File.WriteAllBytes("Chunks\\" + data.Key, data.Value);
                 using (var fs = new FileStream(
@@ -902,24 +936,36 @@ namespace NKLI.DeDupeProxy
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine("<Titanium> ERROR writing to disk cache, Key:" + data.Key);
                 Console.ForegroundColor = ConsoleColor.White;
-            }
+            }*/
 
             return true;
         }
         byte[] ReadChunk(string key)
         {
-            // Is possible return from memory, otherwise fetch from disk
+            // Is possible return from memory, otherwise fetch from disk cache
             if (!memoryCache.TryGet(key, out byte[] data))
             {
+                if (chunkCache.ContainsKey(key))
+                {
+                    if (chunkCache.TryGetValue(key, out Stream chunkStream))
+                    {
+                        Console.WriteLine("!------------------ Attempting to decompress chunk");
+                        return CompressionFactory.Lzf4.Decompress(chunkStream);
+                    }
+                    else return null;
+                }
+                else return null;
+
+
                 // Returning null in case of file not found tells the calling function the object retrieval has failed
-                if (File.Exists("Chunks\\" + key))
+                /*if (File.Exists("Chunks\\" + key))
                 {
                     byte[] readData = File.ReadAllBytes("Chunks\\" + key);
                     // Copy back read chunks to memory cache
                     memoryCache.AddReplace(key, readData);
                     return readData;
                 }
-                else return null;
+                else return null;*/
             }
             else
             {
@@ -934,7 +980,8 @@ namespace NKLI.DeDupeProxy
                 // First delete from memory
                 if (memoryCache.Contains(key)) memoryCache.Remove(key);
                 // Then delete from disk
-                File.Delete("Chunks\\" + key);
+                //File.Delete("Chunks\\" + key);
+
             }
             catch (Exception)
             {
