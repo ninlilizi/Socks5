@@ -34,8 +34,9 @@ namespace NKLI.DeDupeProxy
 
         public static List<string> dontDecrypt;
 
-        
-
+        // Just here for debug/testing purposes
+        public ulong expiredCount;
+              
         // Chunk cache
         DirectoryInfo chunkCacheDir = new DirectoryInfo(@"chunkCache");   // where to store the cache
         LfuCachePolicy<string> chunkCachePolicy = new LfuCachePolicy<string>();      // using an LRU cache policy
@@ -47,6 +48,8 @@ namespace NKLI.DeDupeProxy
 
         // Chunk encoding queue
         public static IPersistentQueue chunkQueue;
+        public ulong chunkLock = 0;
+        public bool queueLock = false;
 
         struct ObjectStruct
         {
@@ -282,17 +285,24 @@ namespace NKLI.DeDupeProxy
             var threadDeDupe = new Thread(async () => {
                 while (true)
                 {
+                    while (chunkLock > 0)
+                    { Thread.Sleep(100); }
+                    queueLock = true;
+
                     using (var session = chunkQueue.OpenSession())
                     {
                         var data = session.Dequeue();
-                        if (data == null) { Thread.Sleep(500); continue; }
+                        session.Flush();
+
+                        queueLock = false;
+                        if (data == null) { Thread.Sleep(1000); continue; }
 
                         // First decode request from queue
                         try
                         {
                             ObjectStruct chunkStruct = new ObjectStruct();
                             chunkStruct.UnPackStruct(data);
-                            session.Flush();
+                            
 
                             try
                             {
@@ -305,7 +315,8 @@ namespace NKLI.DeDupeProxy
 
                                 if (deDupe.IndexStats(out NumObjects, out NumChunks, out LogicalBytes, out PhysicalBytes, out DedupeRatioX, out DedupeRatioPercent))
                                     await WriteToConsole("<Titanium> (DeDupe) stored object Size:" + String.Format("{0:n2}", (bodyLength / 1024)) + "Kb Chunks:" + chunkCount + " URI:" + bodyURI + Environment.NewLine +
-                                                         "                    [Objects:" + NumObjects + "]/[Chunks:" + NumChunks + "] - [Logical:" + String.Format("{0:n0}", (LogicalBytes / 1024)) + "Kb]/[Physical:" + String.Format("{0:n0}", (PhysicalBytes / 1024)) + "Kb] + [Ratio:" + Math.Round(DedupeRatioPercent, 4) + "%]", ConsoleColor.Yellow);
+                                                         "                    [Objects:" + NumObjects + "]/[Chunks:" + NumChunks + "] - [Logical:" + String.Format("{0:n0}", (LogicalBytes / 1024)) + "Kb]/[Physical:" + String.Format("{0:n0}", (PhysicalBytes / 1024)) + "Kb] + [Ratio:" + Math.Round(DedupeRatioPercent, 4) + "%]"
+                                                         + Environment.NewLine + "<Titanium> expired object count: " + expiredCount, ConsoleColor.Yellow);
                             }
                             catch { await WriteToConsole("<Titanium> [ERROR] Dedupilication attempt failed, URI:" + chunkStruct.URI, ConsoleColor.Red); }
 
@@ -317,13 +328,13 @@ namespace NKLI.DeDupeProxy
                             continue;
                         }
 
-                        // Then write chunks to disk
+                        
                     }
                 }
             });
 
             // We prepare the DeDuplication queue before starting the worker threads
-            //if (File.Exists("chunkQueue//lock")) DeleteChildren("chunkQueue", true);
+            if (File.Exists("chunkQueue//lock")) DeleteChildren("chunkQueue", true);
             chunkQueue = new PersistentQueue("chunkQueue");
             chunkQueue.Internals.ParanoidFlushing = true;
 
@@ -582,6 +593,10 @@ namespace NKLI.DeDupeProxy
             // We only attempt to replay from cache if cached headers also exist.
             if (deDupe.ObjectExists(e.HttpClient.Request.Url + "Headers"))
             {
+                chunkLock++;
+                while (queueLock)
+                { Thread.Sleep(10); }
+
                 try
                 {
                     // We only reconstruct the stream after successful object retrieval
@@ -613,19 +628,42 @@ namespace NKLI.DeDupeProxy
                             }
                             try
                             {
-                                // Check matching body exists and retrive
-                                if (deDupe.ObjectExists(e.HttpClient.Request.Url + "Body"))
+                                // Check if resource has expired
+                                HttpHeader cacheExpires = new HttpHeader("Expires", DateTime.Now.AddYears(1).ToLongDateString() + " 00:00:00 GMT");
+                                try
                                 {
-                                    deDupe.RetrieveObject(e.HttpClient.Request.Url + "Body", out byte[] objectData);
-                                    await WriteToConsole("<Titanium> found object, Size:" + objectData.Length + " URI:" + e.HttpClient.Request.Url, ConsoleColor.Cyan);
+                                    HttpHeader header = e.HttpClient.Response.Headers.GetFirstHeader("Expires");
+                                    if (header != null) cacheExpires = header;
+                                }
+                                catch
+                                {
+                                    await WriteToConsole("<Titanium> (onResponse) Exception occured inspecting cache-control header", ConsoleColor.Red);
+                                }
 
-                                    // Cancel request and respond cached data
-                                    try
+                                if (TitaniumHelper.IsExpired(Convert.ToDateTime(cacheExpires.Value)))
+                                {
+                                    expiredCount++;
+                                    deDupe.DeleteObject(e.HttpClient.Request.Url + "Headers");
+                                    if (deDupe.ObjectExists(e.HttpClient.Request.Url + "Body")) deDupe.DeleteObject(e.HttpClient.Request.Url + "Body");
+                                    await WriteToConsole("<Titanium> object expired URI:" + e.HttpClient.Request.Url, ConsoleColor.Green);
+                                }
+                                else
+                                {
+
+                                    // Check matching body exists and retrive
+                                    if (deDupe.ObjectExists(e.HttpClient.Request.Url + "Body"))
                                     {
-                                        e.Ok(objectData, headerDictionary);
-                                        e.TerminateServerConnection();
+                                        deDupe.RetrieveObject(e.HttpClient.Request.Url + "Body", out byte[] objectData);
+                                        await WriteToConsole("<Titanium> found object, Size: " + String.Format("{0:n0}", (objectData.Length / 1024)) + "Kb, URI:" + e.HttpClient.Request.Url + Environment.NewLine + "<Titanium> expired object count: " + expiredCount, ConsoleColor.Cyan);
+
+                                        // Cancel request and respond cached data
+                                        try
+                                        {
+                                            e.Ok(objectData, headerDictionary);
+                                            e.TerminateServerConnection();
+                                        }
+                                        catch { await WriteToConsole("<Titanium> [ERROR] (onRequest) Failure while attempting to send recontructed request", ConsoleColor.Red); }
                                     }
-                                    catch { await WriteToConsole("<Titanium> [ERROR] (onRequest) Failure while attempting to send recontructed request", ConsoleColor.Red); }
                                 }
                             }
                             catch { await WriteToConsole("<Titanium> [ERROR] (onRequest) Failure while attempting to restore cached object", ConsoleColor.Red); }
@@ -639,6 +677,8 @@ namespace NKLI.DeDupeProxy
                     }
                 }
                 catch { await WriteToConsole("<Titanium> [ERROR] (onRequest) Failure while attempting to restore cached headers", ConsoleColor.Red); }
+
+                chunkLock = Math.Max(0, chunkLock - 1);
             }     
 
 
@@ -891,7 +931,6 @@ namespace NKLI.DeDupeProxy
             public int ResponsePosition { get; set; }
         }
 
-
         //
         #region Watson DeDupe
 
@@ -900,7 +939,7 @@ namespace NKLI.DeDupeProxy
             // First commit to memory cache
             try
             {
-                //memoryCache.AddReplace(data.Key, data.Value);
+                memoryCache.AddReplace(data.Key, data.Value);
             }
             catch
             {
@@ -948,7 +987,7 @@ namespace NKLI.DeDupeProxy
                 {
                     if (chunkCache.TryGetValue(key, out Stream chunkStream))
                     {
-                        Console.WriteLine("!------------------ Attempting to decompress chunk");
+                        //Console.WriteLine("!------------------ Attempting to decompress chunk");
                         return CompressionFactory.Lzf4.Decompress(chunkStream);
                     }
                     else return null;
@@ -1122,5 +1161,11 @@ namespace NKLI.DeDupeProxy
         {
             return System.Text.Encoding.ASCII.GetBytes(str);
         }
+
+        public static bool IsExpired(this DateTime specificDate)
+        {
+            return specificDate < DateTime.Now;
+        }
     }
+
 }
