@@ -47,7 +47,7 @@ namespace WatsonDedupe
 
         #region Private-Members
 
-        private string _IndexFile;
+        private readonly string _IndexFile;
         private int _MinChunkSize;
         private int _MaxChunkSize;
         private int _ShiftCount;
@@ -79,10 +79,12 @@ namespace WatsonDedupe
 
             _IndexFile = DedupeCommon.SanitizeString(indexFile);
 
-            Callbacks = new CallbackMethods();
-            Callbacks.WriteChunk = writeChunkMethod;
-            Callbacks.ReadChunk = readChunkMethod;
-            Callbacks.DeleteChunk = deleteChunkMethod;
+            Callbacks = new CallbackMethods
+            {
+                WriteChunk = writeChunkMethod,
+                ReadChunk = readChunkMethod,
+                DeleteChunk = deleteChunkMethod
+            };
 
             DebugDedupe = debugDedupe;
             DebugSql = debugSql;
@@ -104,17 +106,18 @@ namespace WatsonDedupe
         /// <param name="debugSql">Enable console logging for SQL operations.</param>
         public DedupeLibrary(DbProvider database, Func<Chunk, bool> writeChunkMethod, Func<string, byte[]> readChunkMethod, Func<string, bool> deleteChunkMethod, bool debugDedupe, bool debugSql)
         {
-            if (database == null) throw new ArgumentNullException(nameof(database));
             if (writeChunkMethod == null) throw new ArgumentNullException(nameof(writeChunkMethod));
             if (readChunkMethod == null) throw new ArgumentNullException(nameof(readChunkMethod));
             if (deleteChunkMethod == null) throw new ArgumentNullException(nameof(deleteChunkMethod));
              
-            _Database = database;
+            _Database = database ?? throw new ArgumentNullException(nameof(database));
 
-            Callbacks = new CallbackMethods();
-            Callbacks.WriteChunk = writeChunkMethod;
-            Callbacks.ReadChunk = readChunkMethod;
-            Callbacks.DeleteChunk = deleteChunkMethod;
+            Callbacks = new CallbackMethods
+            {
+                WriteChunk = writeChunkMethod,
+                ReadChunk = readChunkMethod,
+                DeleteChunk = deleteChunkMethod
+            };
 
             DebugDedupe = debugDedupe;
             DebugSql = debugSql;
@@ -170,10 +173,12 @@ namespace WatsonDedupe
             _ShiftCount = shiftCount;
             _BoundaryCheckBytes = boundaryCheckBytes;
 
-            Callbacks = new CallbackMethods();
-            Callbacks.WriteChunk = writeChunkMethod;
-            Callbacks.ReadChunk = readChunkMethod;
-            Callbacks.DeleteChunk = deleteChunkMethod; 
+            Callbacks = new CallbackMethods
+            {
+                WriteChunk = writeChunkMethod,
+                ReadChunk = readChunkMethod,
+                DeleteChunk = deleteChunkMethod
+            };
 
             DebugDedupe = debugDedupe;
             DebugSql = debugSql;
@@ -209,7 +214,6 @@ namespace WatsonDedupe
             bool debugDedupe,
             bool debugSql)
         {
-            if (database == null) throw new ArgumentNullException(nameof(database));
             if (minChunkSize % 8 != 0) throw new ArgumentException("Value for minChunkSize must be evenly divisible by 8.");
             if (maxChunkSize % 8 != 0) throw new ArgumentException("Value for maxChunkSize must be evenly divisible by 8.");
             if (minChunkSize % 64 != 0) throw new ArgumentException("Value for minChunkSize must be evenly divisible by 64.");
@@ -223,16 +227,18 @@ namespace WatsonDedupe
             if (deleteChunkMethod == null) throw new ArgumentNullException(nameof(deleteChunkMethod));
             if (boundaryCheckBytes < 1 || boundaryCheckBytes > 8) throw new ArgumentNullException(nameof(boundaryCheckBytes));
              
-            _Database = database;
+            _Database = database ?? throw new ArgumentNullException(nameof(database));
             _MinChunkSize = minChunkSize;
             _MaxChunkSize = maxChunkSize;
             _ShiftCount = shiftCount;
             _BoundaryCheckBytes = boundaryCheckBytes;
 
-            Callbacks = new CallbackMethods();
-            Callbacks.WriteChunk = writeChunkMethod;
-            Callbacks.ReadChunk = readChunkMethod;
-            Callbacks.DeleteChunk = deleteChunkMethod;
+            Callbacks = new CallbackMethods
+            {
+                WriteChunk = writeChunkMethod,
+                ReadChunk = readChunkMethod,
+                DeleteChunk = deleteChunkMethod
+            };
 
             DebugDedupe = debugDedupe;
             DebugSql = debugSql;
@@ -528,9 +534,7 @@ namespace WatsonDedupe
         /// <returns>True if successful.</returns>
         public bool RetrieveObject(string objectName, out byte[] data)
         {
-            long contentLength = 0;
-            Stream stream = null;
-            bool success = RetrieveObject(objectName, Callbacks, out contentLength, out stream);
+            bool success = RetrieveObject(objectName, Callbacks, out long contentLength, out Stream stream);
             if (stream.Length == 0)
             {
                 data = new byte[0];
@@ -565,9 +569,7 @@ namespace WatsonDedupe
         /// <returns>True if successful.</returns>
         public bool RetrieveObject(string objectName, CallbackMethods callbacks, out byte[] data)
         {
-            long contentLength = 0;
-            Stream stream = null;
-            bool success = RetrieveObject(objectName, callbacks, out contentLength, out stream);
+            bool success = RetrieveObject(objectName, callbacks, out long contentLength, out Stream stream);
             data = DedupeCommon.StreamToBytes(stream);
             return success; 
         }
@@ -653,8 +655,7 @@ namespace WatsonDedupe
             if (callbacks.ReadChunk == null) throw new ArgumentException("ReadChunk callback must be specified.");
             objectName = DedupeCommon.SanitizeString(objectName);
 
-            ObjectMetadata md = null;
-            if (!RetrieveObjectMetadata(objectName, out md)) return false;
+            if (!RetrieveObjectMetadata(objectName, out ObjectMetadata md)) return false;
 
             stream = new DedupeStream(md, _Database, callbacks);
             return true;
@@ -780,8 +781,7 @@ namespace WatsonDedupe
          
         private void InitFromExistingIndex()
         {
-            string tempVal;
-            if (!_Database.GetConfigData("min_chunk_size", out tempVal))
+            if (!_Database.GetConfigData("min_chunk_size", out string tempVal))
             {
                 throw new Exception("Configuration table has invalid value for 'min_chunk_size'.");
             }
@@ -870,11 +870,8 @@ namespace WatsonDedupe
 
             while (true)
             {
-                byte[] newData = null;
-                bool finalChunk = false;
 
-                long tempPosition = 0;
-                byte[] window = streamWindow.GetNextChunk(out tempPosition, out newData, out finalChunk);
+                byte[] window = streamWindow.GetNextChunk(out long tempPosition, out byte[] newData, out bool finalChunk);
                 if (window == null) return true;
                 if (currChunk == null) chunkPosition = tempPosition;
 

@@ -185,8 +185,7 @@ namespace SJP
                 _conn.Open();
 
                 var stm = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='" + _tableName + "'";
-                string o;
-                if (!ExecuteScalar(stm, out o))
+                if (!ExecuteScalar(stm, out string o))
                     throw new Exception("Could not execute query: " + stm);
                 if (o.Length == 0) // new db
                 {

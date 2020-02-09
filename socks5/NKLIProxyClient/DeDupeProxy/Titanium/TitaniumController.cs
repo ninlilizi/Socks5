@@ -200,7 +200,6 @@ namespace NKLI.DeDupeProxy
             Console.WriteLine("<Titanium> Max disk cache, " + String.Format("{0:n0}", (chunkCacheMaxSize / 1024 / 1024)) + "Mb");
             if (!Directory.Exists(chunkCacheDir.Name)) Directory.CreateDirectory(chunkCacheDir.Name);
             chunkCache = new DiskCache<string>(chunkCacheDir, chunkCachePolicy, chunkCacheMaxSize, chunkCachePollingInterval);
-            Console.WriteLine("BOOP!");
 
             //Watson Cache: 1600 entries * 262144 max chunk size = Max 400Mb memory size
             Console.WriteLine("<Titanium> Max memory cache, " + String.Format("{0:n0}", ((deDupeMaxChunkSize * deDupeMaxMemoryCacheItems) / 1024 / 1024)) + "Mb");
@@ -252,7 +251,7 @@ namespace NKLI.DeDupeProxy
                         catch
                         {
                             decodeKey = null;
-                            await WriteToConsole("<Titanium> Expectedly ran out of keys in write cache", ConsoleColor.Red);
+                            await WriteToConsole("<Titanium> [ERROR] Expectedly ran out of keys in write cache", ConsoleColor.Red);
                         }
 
                         if (writeCache.TryGet(decodeKey, out byte[] Chunk))
@@ -305,16 +304,16 @@ namespace NKLI.DeDupeProxy
                                 deDupe.StoreObject(chunkStruct.URI + "Headers", chunkStruct.Headers, out Chunks);
 
                                 if (deDupe.IndexStats(out NumObjects, out NumChunks, out LogicalBytes, out PhysicalBytes, out DedupeRatioX, out DedupeRatioPercent))
-                                    await WriteToConsole("<DeDupe> [Titanium] stored object Size:" + String.Format("{0:n2}", (bodyLength / 1024)) + "Kb Chunks:" + chunkCount + " URI:" + bodyURI + Environment.NewLine +
-                                                     "<DeDupe> [Objects:" + NumObjects + "]/[Chunks:" + NumChunks + "] - [Logical:" + String.Format("{0:n0}", (LogicalBytes / 1024)) + "Kb]/[Physical:" + String.Format("{0:n0}", (PhysicalBytes / 1024)) + "Kb] + [Ratio:" + Math.Round(DedupeRatioPercent, 4) + "%]", ConsoleColor.Yellow);
+                                    await WriteToConsole("<Titanium> (DeDupe) stored object Size:" + String.Format("{0:n2}", (bodyLength / 1024)) + "Kb Chunks:" + chunkCount + " URI:" + bodyURI + Environment.NewLine +
+                                                         "                    [Objects:" + NumObjects + "]/[Chunks:" + NumChunks + "] - [Logical:" + String.Format("{0:n0}", (LogicalBytes / 1024)) + "Kb]/[Physical:" + String.Format("{0:n0}", (PhysicalBytes / 1024)) + "Kb] + [Ratio:" + Math.Round(DedupeRatioPercent, 4) + "%]", ConsoleColor.Yellow);
                             }
-                            catch { await WriteToConsole("<Titanium> Dedupilication attempt failed, URI:" + chunkStruct.URI, ConsoleColor.Red); }
+                            catch { await WriteToConsole("<Titanium> [ERROR] Dedupilication attempt failed, URI:" + chunkStruct.URI, ConsoleColor.Red); }
 
                             //session.Flush();
                         }
                         catch (Exception err)
                         {
-                            await WriteToConsole("Unhandled exception in thread." + err, ConsoleColor.Red);
+                            await WriteToConsole("<Titanium> [ERROR] Unhandled exception in depulication thread." + err, ConsoleColor.Red);
                             continue;
                         }
 
@@ -409,7 +408,7 @@ namespace NKLI.DeDupeProxy
             }
 
             // Don't decrypt these domains
-            dontDecrypt = new List<string> { "plex.direct", "activity.windows.com", "dropbox.com", "boxcryptor.com", "google.com" };
+            dontDecrypt = new List<string> { "plex.direct", "activity.windows.com", "dropbox.com", "boxcryptor.com", "google.com", "www.reddit.com" };
 
             // Only explicit proxies can be set as system proxy!
             //proxyServer.SetAsSystemHttpProxy(explicitEndPoint);
@@ -600,7 +599,7 @@ namespace NKLI.DeDupeProxy
                         // Complain if dictionary is unexpectedly empty
                         if (restoredHeader.Count == 0)
                         {
-                            await WriteToConsole("<Titanium> (onRequest) Cache deserialization resulted in 0 headers", ConsoleColor.Red);
+                            await WriteToConsole("<Titanium> [ERROR] (onRequest) Cache deserialization resulted in 0 headers", ConsoleColor.Red);
                         }
                         else
                         {
@@ -626,10 +625,10 @@ namespace NKLI.DeDupeProxy
                                         e.Ok(objectData, headerDictionary);
                                         e.TerminateServerConnection();
                                     }
-                                    catch { await WriteToConsole("<Titanium> (onRequest) Failure while attempting to send recontructed request", ConsoleColor.Red); }
+                                    catch { await WriteToConsole("<Titanium> [ERROR] (onRequest) Failure while attempting to send recontructed request", ConsoleColor.Red); }
                                 }
                             }
-                            catch { await WriteToConsole("<Titanium> (onRequest) Failure while attempting to restore cached object", ConsoleColor.Red); }
+                            catch { await WriteToConsole("<Titanium> [ERROR] (onRequest) Failure while attempting to restore cached object", ConsoleColor.Red); }
                         }
                     }
                     // In case of object retrieval failing, we wan't to remove it from the Index
@@ -639,7 +638,7 @@ namespace NKLI.DeDupeProxy
                         deDupe.DeleteObject(e.HttpClient.Request.Url + "Body");
                     }
                 }
-                catch { await WriteToConsole("<Titanium> (onRequest) Failure while attempting to restore cached headers", ConsoleColor.Red); }
+                catch { await WriteToConsole("<Titanium> [ERROR] (onRequest) Failure while attempting to restore cached headers", ConsoleColor.Red); }
             }     
 
 
@@ -740,7 +739,7 @@ namespace NKLI.DeDupeProxy
 
                     if (cacheControl.Value.Contains("no-cache") || cacheControl.Value.Contains("no-store"))
                     {
-                        await WriteToConsole("<DeDupe> [Titanium] Respecting no-cache header for key:" + Key, ConsoleColor.DarkYellow);
+                        await WriteToConsole("<Titanium> Respecting no-cache/no-store header for key:" + Key, ConsoleColor.DarkYellow);
 
                         if (deDupe.ObjectExists(Key + "Body"))
                         {
@@ -784,14 +783,14 @@ namespace NKLI.DeDupeProxy
                                         sessionQueue.Enqueue(responseStruct.packed);
                                         sessionQueue.Flush();
                                     }
-                                    catch { await WriteToConsole("<Titanium> Unable to write response body to cache", ConsoleColor.Red); }
+                                    catch { await WriteToConsole("<Titanium> [ERROR] Unable to write response body to cache", ConsoleColor.Red); }
                                 }
                             }
                         }
                         catch
                         {
                             //throw new Exception("Unable to output headers to cache");
-                            await WriteToConsole("<DeDupe> (Titanium) Unable to output headers to cache", ConsoleColor.Red);
+                            await WriteToConsole("<Titanium> [ERROR] Unable to output headers to cache", ConsoleColor.Red);
                         }
 
 
@@ -799,7 +798,7 @@ namespace NKLI.DeDupeProxy
                 }
                 catch
                 {
-                    await WriteToConsole("<Titanium> (onResponse) Exception occured receiving response body", ConsoleColor.Red);
+                    await WriteToConsole("<Titanium> [ERROR] (onResponse) Exception occured receiving response body", ConsoleColor.Red);
                     //throw new Exception("<Titanium> (onResponse) Exception occured receiving response body");
                 }
 
@@ -1067,6 +1066,9 @@ namespace NKLI.DeDupeProxy
                 {
                     // TODO: dispose managed state (managed objects).
                     proxyServer.Dispose();
+
+                    chunkCache.Dispose();
+
                     @lock.Dispose();
                 }
 

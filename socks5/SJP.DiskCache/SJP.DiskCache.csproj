@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <TargetFrameworks>net461</TargetFrameworks>
-    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <TreatWarningsAsErrors>True</TreatWarningsAsErrors>
     <TreatSpecificWarningsAsErrors />
     <DocumentationFile></DocumentationFile>
@@ -20,6 +20,7 @@
     <StartupObject />
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <OutputType>Library</OutputType>
+    <PackageReleaseNotes>Added long-term persistent storage functionality.</PackageReleaseNotes>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net46|AnyCPU'">
@@ -32,6 +33,11 @@
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <DebugType>full</DebugType>
     <DebugSymbols>true</DebugSymbols>
+    <CodeAnalysisRuleSet>SJP.DiskCache1.ruleset</CodeAnalysisRuleSet>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net461|AnyCPU'">
+    <CodeAnalysisRuleSet>SJP.DiskCache1.ruleset</CodeAnalysisRuleSet>
   </PropertyGroup>
 
   <ItemGroup>
