@@ -21,6 +21,7 @@ using Titanium.Web.Proxy.StreamExtended.Network;
 using WatsonDedupe;
 using Noemax.Compression;
 using SJP.DiskCache;
+using System.Net.Http.Headers;
 
 namespace NKLI.DeDupeProxy
 {
@@ -81,7 +82,7 @@ namespace NKLI.DeDupeProxy
 
                 Buffer.BlockCopy(Encoding.UTF8.GetBytes(URI), 0, packed, 12, requestURI.Length);
                 Buffer.BlockCopy(incomingHeaders, 0, packed, 12 + requestURI.Length, incomingHeaders.Length);
-                Buffer.BlockCopy(incomingBody, 0, packed, 12 + requestURI.Length + incomingHeaders.Length, incomingBody.Length);
+                if (incomingBody.Length != 0) Buffer.BlockCopy(incomingBody, 0, packed, 12 + requestURI.Length + incomingHeaders.Length, incomingBody.Length);
             }
 
             public void UnPackStruct(byte[] packed)
@@ -96,7 +97,7 @@ namespace NKLI.DeDupeProxy
                 URI = Encoding.UTF8.GetString(packed, 12, URILength);
 
                 Buffer.BlockCopy(packed, 12 + URILength, Headers, 0, HeaderLength);
-                Buffer.BlockCopy(packed, 12 + URILength + HeaderLength, Body, 0, BodyLength);
+                if (BodyLength != 0) Buffer.BlockCopy(packed, 12 + URILength + HeaderLength, Body, 0, BodyLength);
             }
         };
         //
@@ -122,7 +123,7 @@ namespace NKLI.DeDupeProxy
         static ulong PhysicalBytes;
         static decimal DedupeRatioX;
         static decimal DedupeRatioPercent;
-        public static int maxObjectSizeHTTP;
+        public static long maxObjectSizeHTTP;
         //END
 
         public TitaniumController()
@@ -208,7 +209,7 @@ namespace NKLI.DeDupeProxy
 
             //Watson DeDupe
             //if (!Directory.Exists("Chunks")) Directory.CreateDirectory("Chunks");
-            int maxSizeMB = 500;
+            long maxSizeMB = 500;
             maxObjectSizeHTTP = maxSizeMB * 1024 * 1024;
             Console.Write("<Titanium> Maximum supported HTTP object, " + TitaniumHelper.FormatSize(Int32.MaxValue) + " / Maximum cached HTTP object, " + TitaniumHelper.FormatSize(maxObjectSizeHTTP) + Environment.NewLine);
 
@@ -300,19 +301,24 @@ namespace NKLI.DeDupeProxy
                             ObjectStruct chunkStruct = new ObjectStruct();
                             chunkStruct.UnPackStruct(data);
                             
-
                             try
                             {
-                                deDupe.StoreObject(chunkStruct.URI + "Body", chunkStruct.Body, out Chunks);
-                                int chunkCount = Chunks.Count;
                                 int bodyLength = chunkStruct.Body.Length;
-                                string bodyURI = chunkStruct.URI;                              
+                                string bodyURI = chunkStruct.URI;
 
-                                deDupe.StoreObject(chunkStruct.URI + "Headers", chunkStruct.Headers, out Chunks);
+                                string responseString = "";
+                                if (bodyLength != 0)
+                                {
+                                    deDupe.StoreOrReplaceObject(chunkStruct.URI + "Body", chunkStruct.Body, out Chunks);
+                                    responseString = ("<Titanium> (DeDupe) stored object, Size:" + TitaniumHelper.FormatSize(bodyLength) + ", Chunks:" + Chunks.Count + ", URI:" + bodyURI + Environment.NewLine);
+                                }
+                                else responseString = ("<Titanium> (DeDupe) refreshed object, URI:" + bodyURI + Environment.NewLine);
+                                
+
+                                deDupe.StoreOrReplaceObject(chunkStruct.URI + "Headers", chunkStruct.Headers, out Chunks);
 
                                 if (deDupe.IndexStats(out NumObjects, out NumChunks, out LogicalBytes, out PhysicalBytes, out DedupeRatioX, out DedupeRatioPercent))
-                                    await WriteToConsole("<Titanium> (DeDupe) stored object Size:" + TitaniumHelper.FormatSize(bodyLength) + ", Chunks:" + chunkCount + " URI:" + bodyURI + Environment.NewLine +
-                                                         "                    [Objects:" + NumObjects + "]/[Chunks:" + NumChunks + "] - [Logical:" + TitaniumHelper.FormatSize(LogicalBytes) + "]/[Physical:" + TitaniumHelper.FormatSize(PhysicalBytes) + "] + [Ratio:" + Math.Round(DedupeRatioPercent, 4) + "%]", ConsoleColor.Yellow);
+                                    await WriteToConsole(responseString + "                    [Objects:" + NumObjects + "]/[Chunks:" + NumChunks + "] - [Logical:" + TitaniumHelper.FormatSize(LogicalBytes) + "]/[Physical:" + TitaniumHelper.FormatSize(PhysicalBytes) + "] + [Ratio:" + Math.Round(DedupeRatioPercent, 4) + "%]", ConsoleColor.Yellow);
                             }
                             catch { await WriteToConsole("<Titanium> [ERROR] Dedupilication attempt failed, URI:" + chunkStruct.URI, ConsoleColor.Red); }
 
@@ -320,7 +326,7 @@ namespace NKLI.DeDupeProxy
                         }
                         catch (Exception err)
                         {
-                            await WriteToConsole("<Titanium> [ERROR] Unhandled exception in depulication thread." + err, ConsoleColor.Red);
+                            await WriteToConsole("<Titanium> [ERROR] Exception occured while unpacking from deduplication queue." + err, ConsoleColor.Red);
                             continue;
                         }
 
@@ -415,7 +421,7 @@ namespace NKLI.DeDupeProxy
             }
 
             // Don't decrypt these domains
-            dontDecrypt = new List<string> { "plex.direct", "activity.windows.com", "dropbox.com", "boxcryptor.com", "google.com", "www.reddit.com" };
+            dontDecrypt = new List<string> { "plex.direct", "activity.windows.com", "dropbox.com", "boxcryptor.com", "google.com" };
 
             // Only explicit proxies can be set as system proxy!
             //proxyServer.SetAsSystemHttpProxy(explicitEndPoint);
@@ -595,6 +601,7 @@ namespace NKLI.DeDupeProxy
 
                 try
                 {
+                    bool deleteCache = false;
                     // We only reconstruct the stream after successful object retrieval
                     if (deDupe.RetrieveObject(e.HttpClient.Request.Url + "Headers", out byte[] headerData))
                     {
@@ -619,7 +626,7 @@ namespace NKLI.DeDupeProxy
                             foreach (var pair in restoredHeader)
                             {
                                 //await writeToConsole("Key:" + pair.Key + " Value:" + pair.Value, ConsoleColor.Green);
-                                e.HttpClient.Response.Headers.AddHeader(new HttpHeader(pair.Key, pair.Value));
+                                //e.HttpClient.Response.Headers.AddHeader(new HttpHeader(pair.Key, pair.Value));
                                 headerDictionary.Add(pair.Key, new HttpHeader(pair.Key, pair.Value));
                             }
                             try
@@ -638,8 +645,9 @@ namespace NKLI.DeDupeProxy
 
                                 if (TitaniumHelper.IsExpired(Convert.ToDateTime(cacheExpires.Value)))
                                 {
+                                    // If object has expired, then delete cached headers and revalidate against server
                                     deDupe.DeleteObject(e.HttpClient.Request.Url + "Headers");
-                                    if (deDupe.ObjectExists(e.HttpClient.Request.Url + "Body")) deDupe.DeleteObject(e.HttpClient.Request.Url + "Body");
+                                    if (!e.HttpClient.Response.Headers.HeaderExists("If-Modified-Since")) e.HttpClient.Request.Headers.AddHeader("If-Modified-Since", DateTime.Now.ToUniversalTime().ToString("ddd, dd MMM yyyy HH:mm:ss 'GMT'"));
                                     await WriteToConsole("<Titanium> object expired URI:" + e.HttpClient.Request.Url, ConsoleColor.Green);
                                 }
                                 else
@@ -650,15 +658,31 @@ namespace NKLI.DeDupeProxy
                                     {
                                         deDupe.RetrieveObject(e.HttpClient.Request.Url + "Body", out byte[] objectData);
 
-                                        await WriteToConsole("<Titanium> found object, Size: " + TitaniumHelper.FormatSize(objectData.Length)  + ", URI:" + e.HttpClient.Request.Url, ConsoleColor.Cyan);
-
-                                        // Cancel request and respond cached data
-                                        try
+                                        // Get cached content-length
+                                        if (headerDictionary.TryGetValue("Content-Length", out HttpHeader contentLength))
                                         {
-                                            e.Ok(objectData, headerDictionary);
-                                            e.TerminateServerConnection();
+                                            // Make sure both header content length and retrieved body length match
+                                            if (Convert.ToInt64(contentLength.Value) == objectData.LongLength)
+                                            {
+
+                                                await WriteToConsole("<Titanium> found object, Size: " + TitaniumHelper.FormatSize(objectData.Length) + ", URI:" + e.HttpClient.Request.Url, ConsoleColor.Cyan);
+
+                                                // Cancel request and respond cached data
+                                                try { e.Ok(objectData, headerDictionary, true); }
+                                                catch { await WriteToConsole("<Titanium> [ERROR] (onRequest) Failure while attempting to send recontructed request", ConsoleColor.Red); }
+                                            }
+                                            else
+                                            {
+                                                await WriteToConsole("<Titanium> Content/Body length mismatch during cache retrieval", ConsoleColor.Red);
+                                                await WriteToConsole("<Titanium> [Content: " + TitaniumHelper.FormatSize(Convert.ToInt64(contentLength.Value)) + "], [Content: " + TitaniumHelper.FormatSize(objectData.LongLength) + "], URI:" + e.HttpClient.Request.Url, ConsoleColor.Red);
+                                                deleteCache = true;
+                                            }
                                         }
-                                        catch { await WriteToConsole("<Titanium> [ERROR] (onRequest) Failure while attempting to send recontructed request", ConsoleColor.Red); }
+                                        else
+                                        {
+                                            await WriteToConsole("<Titanium> Content-Length header not found during cache retrieval", ConsoleColor.Red);
+                                            deleteCache = true;
+                                        }
                                     }
                                 }
                             }
@@ -666,7 +690,9 @@ namespace NKLI.DeDupeProxy
                         }
                     }
                     // In case of object retrieval failing, we wan't to remove it from the Index
-                    else
+                    else deleteCache = true;
+
+                    if (deleteCache)
                     {
                         deDupe.DeleteObject(e.HttpClient.Request.Url + "Headers");
                         deDupe.DeleteObject(e.HttpClient.Request.Url + "Body");
@@ -751,49 +777,111 @@ namespace NKLI.DeDupeProxy
 
             //if (!e.ProxySession.Request.Host.Equals("medeczane.sgk.gov.tr")) return;
             //if (!e.HttpClient.Request.Host.Equals("www.gutenberg.org")) return;
-            if ((e.HttpClient.Request.Method == "GET" || e.HttpClient.Request.Method == "POST") && (e.HttpClient.Response.StatusCode == (int)HttpStatusCode.OK) && e.HttpClient.Response.HasBody)
+            if ((e.HttpClient.Request.Method == "GET" || e.HttpClient.Request.Method == "POST") 
+                && ((e.HttpClient.Response.StatusCode == (int)HttpStatusCode.OK) || (e.HttpClient.Response.StatusCode == (int)HttpStatusCode.NotModified)))
             {
 
                 byte[] output = new byte[0];
+                string Key = e.HttpClient.Request.Url;
                 try
                 {
-                    output = await e.GetResponseBody();
-
-                    string Key = e.HttpClient.Request.Url;
-
-                    // If no headers than don't even bother
-                    if (e.HttpClient.Response.Headers.Count() != 0)
+                    
+                    bool bodyValidated = false;
+                    bool bodyRetrieved = false;
+                    // If resource NotModified, then attempt to retrieve from cache
+                    if ((e.HttpClient.Response.StatusCode == (int)HttpStatusCode.NotModified) && (deDupe.ObjectExists(Key + "Body")))
                     {
+                        if (deDupe.RetrieveObject(Key + "Body", out byte[] objectData))
+                        {
+                            await WriteToConsole("<Titanium> Re-validated object, Size: " + TitaniumHelper.FormatSize(objectData.Length) + ", URI:" + Key, ConsoleColor.Cyan);
 
-                        // Respect cache control headers
-                        HttpHeader cacheControl = new HttpHeader("Cache-Control", "none");
+                            // Cancel request and respond cached data
+                            try
+                            {
+                                output = objectData;
+                                e.SetResponseBody(objectData);
+                                e.HttpClient.Response.StatusCode = (int)HttpStatusCode.OK;
+                                bodyValidated = true;
+                                bodyRetrieved = true;
+                            }
+                            catch { await WriteToConsole("<Titanium> [ERROR] (OnResponse) Failure while attempting to send recontructed request", ConsoleColor.Red); }
+                        }
+                        // If body retrieval failed, then re-request
+                        //if (!bodyRetrieved) e.ReRequest = true;
+                        //e.TerminateSession();
+                    }
+                    // If !NotModified than receive response body from server
+                    else if (e.HttpClient.Response.StatusCode != (int)HttpStatusCode.NotModified && e.HttpClient.Response.HasBody)
+                    {
+                        if (deDupe.ObjectExists(Key + "Body")) deDupe.DeleteObject(Key + "Body");
+                        if (deDupe.ObjectExists(Key + "Headers")) deDupe.DeleteObject(Key + "Headers");
+
+                        output = await e.GetResponseBody();
+                        if (output.LongLength != 0) bodyRetrieved = true;
+                    }
+                 
+                    // If no headers or body received than don't even bother
+                    if ((e.HttpClient.Response.Headers.Count() != 0) && bodyRetrieved)
+                    {
+                        // We have what we need, close server connection early.
+                        e.TerminateServerConnection();
+
+                        // Retrive Cache-Control header
+                        CacheControlHeaderValue cacheControl = new CacheControlHeaderValue();
                         try
                         {
                             HttpHeader header = e.HttpClient.Response.Headers.GetFirstHeader("Cache-Control");
-                            if (header != null) cacheControl = header;
+                            if (header != null) cacheControl = CacheControlHeaderValue.Parse(header.Value);
                         }
                         catch
                         {
                             await WriteToConsole("<Titanium> (onResponse) Exception occured inspecting cache-control header", ConsoleColor.Red);
                         }
 
-                        if (cacheControl.Value.Contains("no-cache") || cacheControl.Value.Contains("no-store"))
+                        // Respect cache control headers
+                        bool canCache = true;
+                        if (cacheControl.NoCache || cacheControl.NoStore || cacheControl.MaxAge.HasValue)
                         {
-                            await WriteToConsole("<Titanium> Respecting no-cache/no-store header for key:" + Key, ConsoleColor.DarkYellow);
-
-                            if (deDupe.ObjectExists(Key + "Body"))
+                            string readableMessage = "";
+                            // No-Store
+                            if (cacheControl.NoStore)
                             {
-                                deDupe.DeleteObject(Key + "Body");
-                                deDupe.DeleteObject(Key + "Headers");
+                                canCache = false;
+                                readableMessage += "(No-Store) ";
                             }
+                            // No-Cache
+                            if (cacheControl.NoCache)
+                            {
+                                readableMessage += "(No-Cache) ";
+                                if ((!cacheControl.MaxAge.HasValue) && (canCache)) e.HttpClient.Response.Headers.AddHeader("Expires", DateTime.Now.ToUniversalTime().ToString("ddd, dd MMM yyyy HH:mm:ss 'GMT'"));
+                            }
+                            // Max-Age
+                            if (cacheControl.MaxAge.HasValue)
+                            {
+                                readableMessage += "(Max-Age) ";
+                                e.HttpClient.Response.Headers.AddHeader("Expires", DateTime.Now.Add(cacheControl.MaxAge.Value).ToUniversalTime().ToString("ddd, dd MMM yyyy HH:mm:ss 'GMT'"));
+                            }
+
+                            await WriteToConsole("<Titanium> Respecting " + readableMessage + "header for key:" + Key, ConsoleColor.DarkYellow);
+                        }
+                        if (!canCache)
+                        {
+                            if (deDupe.ObjectExists(Key + "Body")) deDupe.DeleteObject(Key + "Body");
+                            if (deDupe.ObjectExists(Key + "Headers")) deDupe.DeleteObject(Key + "Headers");
                         }
                         else
                         {
+                            //if (cacheControl. )
+                            //{
+                            //    await WriteToConsole("<Titanium> Adding expires header based on Cache-Control Max-Age for key: " + Key, ConsoleColor.DarkGreen);
+                            //    CacheControlHeaderValue CacheControlHeaderValue.Parse(cacheControl.Value);
+                            //}
+
 
                             try
                             {
                                 // For now we only want to avoid caching range-requests and put a max size on incoming objects
-                                if ((output.Count() == e.HttpClient.Response.ContentLength) &&
+                                if ((output.LongLength == e.HttpClient.Response.ContentLength) &&
                                     (e.HttpClient.Response.ContentLength != 0) &&
                                     (maxObjectSizeHTTP > e.HttpClient.Response.ContentLength))
                                 {
@@ -814,7 +902,8 @@ namespace NKLI.DeDupeProxy
                                     try
                                     {
                                         ObjectStruct responseStruct = new ObjectStruct();
-                                        responseStruct.PackStruct(e.HttpClient.Request.Url, mStream.ToArray(), output);
+                                        if (!bodyValidated) responseStruct.PackStruct(e.HttpClient.Request.Url, mStream.ToArray(), output);
+                                        else responseStruct.PackStruct(e.HttpClient.Request.Url, mStream.ToArray(), new byte[0]);
                                         mStream.Dispose();
 
                                         IPersistentQueueSession sessionQueue = chunkQueue.OpenSession();
@@ -854,7 +943,8 @@ namespace NKLI.DeDupeProxy
             }
             else
             {
-                await WriteToConsole("<Titanium> Skipping URL:" + e.HttpClient.Request.Url, ConsoleColor.Magenta);
+                string reasonString = "[Method:" + e.HttpClient.Request.Method + "], [Code:" + e.HttpClient.Response.StatusCode + "], ";
+                await WriteToConsole("<Titanium> Skipping " + reasonString + "[HasBody:" + e.HttpClient.Response.HasBody + "], URL:" + e.HttpClient.Request.Url, ConsoleColor.Magenta);
             }
         }
 
@@ -1165,6 +1255,14 @@ namespace NKLI.DeDupeProxy
         public static bool IsExpired(this DateTime specificDate)
         {
             return specificDate < DateTime.Now;
+        }
+
+        public static string FormatSize(long size)
+        {
+            if (size > 1073741824) return String.Format("{0:n2}", ((decimal)size / (decimal)1073741824)) + "GB";
+            else if (size > 1048576) return String.Format("{0:n2}", ((decimal)size / (decimal)1048576)) + "MB";
+            else if (size > 1024) return String.Format("{0:n2}", ((decimal)size / (decimal)1024)) + "KB";
+            else return size + "B";
         }
 
         public static string FormatSize(ulong size)
