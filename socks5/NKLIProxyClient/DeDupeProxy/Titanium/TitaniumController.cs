@@ -881,9 +881,9 @@ namespace NKLI.DeDupeProxy
 
                             try
                             {
-                                // For now we only want to avoid caching range-requests and put a max size on incoming objects
+                                // For now we only want to avoid caching range-requests and put a min/max size on incoming objects
                                 if ((output.LongLength == e.HttpClient.Response.ContentLength) &&
-                                    (e.HttpClient.Response.ContentLength != 0) &&
+                                    (e.HttpClient.Response.ContentLength > 512) &&
                                     (maxObjectSizeHTTP > e.HttpClient.Response.ContentLength))
                                 {
 
