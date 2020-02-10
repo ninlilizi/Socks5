@@ -795,7 +795,7 @@ namespace NKLI.DeDupeProxy
                         {
                             await WriteToConsole("<Titanium> Re-validated object, Size: " + TitaniumHelper.FormatSize(objectData.Length) + ", URI:" + Key, ConsoleColor.Cyan);
 
-                            // Cancel request and respond cached data
+                            // Respond cached data
                             try
                             {
                                 output = objectData;
@@ -859,7 +859,8 @@ namespace NKLI.DeDupeProxy
                             if (cacheControl.MaxAge.HasValue)
                             {
                                 readableMessage += "(Max-Age) ";
-                                e.HttpClient.Response.Headers.AddHeader("Expires", DateTime.Now.Add(cacheControl.MaxAge.Value).ToUniversalTime().ToString("ddd, dd MMM yyyy HH:mm:ss 'GMT'"));
+                                if (!e.HttpClient.Response.Headers.HeaderExists("Expires")) // Nin TODO - Test to ensure expirey whichever comes first if both exist
+                                    e.HttpClient.Response.Headers.AddHeader("Expires", DateTime.Now.Add(cacheControl.MaxAge.Value).ToUniversalTime().ToString("ddd, dd MMM yyyy HH:mm:ss 'GMT'"));
                             }
 
                             await WriteToConsole("<Titanium> Respecting " + readableMessage + "header for key:" + Key, ConsoleColor.DarkYellow);
