@@ -33,15 +33,12 @@ namespace NKLI.DeDupeProxy
         public static int RemotePort_Socks;
 
         public static List<string> dontDecrypt;
-
-        // Just here for debug/testing purposes
-        public ulong expiredCount;
-              
+             
         // Chunk cache
         DirectoryInfo chunkCacheDir = new DirectoryInfo(@"chunkCache");   // where to store the cache
         LfuCachePolicy<string> chunkCachePolicy = new LfuCachePolicy<string>();      // using an LRU cache policy
-        const long chunkCacheUnitSize = 1024L * 1024L * 1024L * 1024L; // 1GB
-        const long chunkCacheMaxSize = chunkCacheUnitSize * 10L; // 10GB
+        const ulong chunkCacheUnitSize = 1073741824UL; // 1GB
+        const ulong chunkCacheMaxSize = chunkCacheUnitSize * 10UL; // 10GB
         TimeSpan chunkCachePollingInterval = TimeSpan.FromMinutes(1);
         DiskCache<string> chunkCache;
         //
@@ -200,12 +197,12 @@ namespace NKLI.DeDupeProxy
 
 
             // Initialise chunk cache
-            Console.WriteLine("<Titanium> Max disk cache, " + String.Format("{0:n0}", (chunkCacheMaxSize / 1024 / 1024)) + "Mb");
+            Console.WriteLine("<Titanium> Max disk cache, " + TitaniumHelper.FormatSize(chunkCacheMaxSize));
             if (!Directory.Exists(chunkCacheDir.Name)) Directory.CreateDirectory(chunkCacheDir.Name);
             chunkCache = new DiskCache<string>(chunkCacheDir, chunkCachePolicy, chunkCacheMaxSize, chunkCachePollingInterval);
 
             //Watson Cache: 1600 entries * 262144 max chunk size = Max 400Mb memory size
-            Console.WriteLine("<Titanium> Max memory cache, " + String.Format("{0:n0}", ((deDupeMaxChunkSize * deDupeMaxMemoryCacheItems) / 1024 / 1024)) + "Mb");
+            Console.WriteLine("<Titanium> Max memory cache, " + TitaniumHelper.FormatSize(deDupeMaxChunkSize * deDupeMaxMemoryCacheItems));
             memoryCache = new LRUCache<string, byte[]>(deDupeMaxMemoryCacheItems, 100, false);
             //writeCache = new FIFOCache<string, byte[]>(1000, 100, false);
 
@@ -213,7 +210,7 @@ namespace NKLI.DeDupeProxy
             //if (!Directory.Exists("Chunks")) Directory.CreateDirectory("Chunks");
             int maxSizeMB = 500;
             maxObjectSizeHTTP = maxSizeMB * 1024 * 1024;
-            Console.Write("<Titanium> Maximum supported HTTP object, " + (Int32.MaxValue / 1024 / 1024) + "Mb / Maximum cached HTTP object, " + (maxObjectSizeHTTP / 1024 / 1024) + "Mb" + Environment.NewLine);
+            Console.Write("<Titanium> Maximum supported HTTP object, " + TitaniumHelper.FormatSize(Int32.MaxValue) + " / Maximum cached HTTP object, " + TitaniumHelper.FormatSize(maxObjectSizeHTTP) + Environment.NewLine);
 
 
             if (File.Exists("dbs/dedupe.db"))
@@ -230,7 +227,7 @@ namespace NKLI.DeDupeProxy
             // Gather index and dedupe stats
             if (deDupe.IndexStats(out NumObjects, out NumChunks, out LogicalBytes, out PhysicalBytes, out DedupeRatioX, out DedupeRatioPercent))
             {
-                Console.WriteLine("  [Objects:" + NumObjects + "]/[Chunks:" + NumChunks + "] - [Logical:" + String.Format("{0:n0}", (LogicalBytes / 1024)) + "Kb]/[Physical:" + String.Format("{0:n0}", (PhysicalBytes / 1024)) + "Kb] + [Ratio:" + Math.Round(DedupeRatioPercent, 4) + "%]");
+                Console.WriteLine("  [Objects:" + NumObjects + "]/[Chunks:" + NumChunks + "] - [Logical:" + TitaniumHelper.FormatSize(LogicalBytes) + "]/[Physical:" + TitaniumHelper.FormatSize(PhysicalBytes) + "] + [Ratio:" + Math.Round(DedupeRatioPercent, 4) + "%]");
                 //Console.WriteLine("  Dedupe ratio     : " + DedupeRatioX + "X, " + DedupeRatioPercent + "%");
                 Console.WriteLine("-------------------------");
             }
@@ -314,9 +311,8 @@ namespace NKLI.DeDupeProxy
                                 deDupe.StoreObject(chunkStruct.URI + "Headers", chunkStruct.Headers, out Chunks);
 
                                 if (deDupe.IndexStats(out NumObjects, out NumChunks, out LogicalBytes, out PhysicalBytes, out DedupeRatioX, out DedupeRatioPercent))
-                                    await WriteToConsole("<Titanium> (DeDupe) stored object Size:" + String.Format("{0:n2}", (bodyLength / 1024)) + "Kb Chunks:" + chunkCount + " URI:" + bodyURI + Environment.NewLine +
-                                                         "                    [Objects:" + NumObjects + "]/[Chunks:" + NumChunks + "] - [Logical:" + String.Format("{0:n0}", (LogicalBytes / 1024)) + "Kb]/[Physical:" + String.Format("{0:n0}", (PhysicalBytes / 1024)) + "Kb] + [Ratio:" + Math.Round(DedupeRatioPercent, 4) + "%]"
-                                                         + Environment.NewLine + "<Titanium> expired object count: " + expiredCount, ConsoleColor.Yellow);
+                                    await WriteToConsole("<Titanium> (DeDupe) stored object Size:" + TitaniumHelper.FormatSize(bodyLength) + ", Chunks:" + chunkCount + " URI:" + bodyURI + Environment.NewLine +
+                                                         "                    [Objects:" + NumObjects + "]/[Chunks:" + NumChunks + "] - [Logical:" + TitaniumHelper.FormatSize(LogicalBytes) + "]/[Physical:" + TitaniumHelper.FormatSize(PhysicalBytes) + "] + [Ratio:" + Math.Round(DedupeRatioPercent, 4) + "%]", ConsoleColor.Yellow);
                             }
                             catch { await WriteToConsole("<Titanium> [ERROR] Dedupilication attempt failed, URI:" + chunkStruct.URI, ConsoleColor.Red); }
 
@@ -642,7 +638,6 @@ namespace NKLI.DeDupeProxy
 
                                 if (TitaniumHelper.IsExpired(Convert.ToDateTime(cacheExpires.Value)))
                                 {
-                                    expiredCount++;
                                     deDupe.DeleteObject(e.HttpClient.Request.Url + "Headers");
                                     if (deDupe.ObjectExists(e.HttpClient.Request.Url + "Body")) deDupe.DeleteObject(e.HttpClient.Request.Url + "Body");
                                     await WriteToConsole("<Titanium> object expired URI:" + e.HttpClient.Request.Url, ConsoleColor.Green);
@@ -654,7 +649,8 @@ namespace NKLI.DeDupeProxy
                                     if (deDupe.ObjectExists(e.HttpClient.Request.Url + "Body"))
                                     {
                                         deDupe.RetrieveObject(e.HttpClient.Request.Url + "Body", out byte[] objectData);
-                                        await WriteToConsole("<Titanium> found object, Size: " + String.Format("{0:n0}", (objectData.Length / 1024)) + "Kb, URI:" + e.HttpClient.Request.Url + Environment.NewLine + "<Titanium> expired object count: " + expiredCount, ConsoleColor.Cyan);
+
+                                        await WriteToConsole("<Titanium> found object, Size: " + TitaniumHelper.FormatSize(objectData.Length)  + ", URI:" + e.HttpClient.Request.Url, ConsoleColor.Cyan);
 
                                         // Cancel request and respond cached data
                                         try
@@ -765,41 +761,43 @@ namespace NKLI.DeDupeProxy
 
                     string Key = e.HttpClient.Request.Url;
 
-                    // Respect cache control headers
-                    HttpHeader cacheControl = new HttpHeader("Cache-Control", "none");
-                    try
-                    {
-                        HttpHeader header = e.HttpClient.Response.Headers.GetFirstHeader("Cache-Control");
-                        if (header != null) cacheControl = header;
-                    }
-                    catch
-                    {
-                        await WriteToConsole("<Titanium> (onResponse) Exception occured inspecting cache-control header", ConsoleColor.Red);
-                    }
-
-                    if (cacheControl.Value.Contains("no-cache") || cacheControl.Value.Contains("no-store"))
-                    {
-                        await WriteToConsole("<Titanium> Respecting no-cache/no-store header for key:" + Key, ConsoleColor.DarkYellow);
-
-                        if (deDupe.ObjectExists(Key + "Body"))
-                        {
-                            deDupe.DeleteObject(Key + "Body");
-                            deDupe.DeleteObject(Key + "Headers");
-                        }
-                    }
-                    else
+                    // If no headers than don't even bother
+                    if (e.HttpClient.Response.Headers.Count() != 0)
                     {
 
+                        // Respect cache control headers
+                        HttpHeader cacheControl = new HttpHeader("Cache-Control", "none");
                         try
                         {
-                            // For now we only want to avoid caching range-requests and put a max size on incoming objects
-                            if ((output.Count() == e.HttpClient.Response.ContentLength) && 
-                                (e.HttpClient.Response.ContentLength > 0) && 
-                                (maxObjectSizeHTTP > e.HttpClient.Response.ContentLength))
+                            HttpHeader header = e.HttpClient.Response.Headers.GetFirstHeader("Cache-Control");
+                            if (header != null) cacheControl = header;
+                        }
+                        catch
+                        {
+                            await WriteToConsole("<Titanium> (onResponse) Exception occured inspecting cache-control header", ConsoleColor.Red);
+                        }
+
+                        if (cacheControl.Value.Contains("no-cache") || cacheControl.Value.Contains("no-store"))
+                        {
+                            await WriteToConsole("<Titanium> Respecting no-cache/no-store header for key:" + Key, ConsoleColor.DarkYellow);
+
+                            if (deDupe.ObjectExists(Key + "Body"))
                             {
-                                // If no headers than don't even bother
-                                if (e.HttpClient.Response.Headers.Count() != 0)
+                                deDupe.DeleteObject(Key + "Body");
+                                deDupe.DeleteObject(Key + "Headers");
+                            }
+                        }
+                        else
+                        {
+
+                            try
+                            {
+                                // For now we only want to avoid caching range-requests and put a max size on incoming objects
+                                if ((output.Count() == e.HttpClient.Response.ContentLength) &&
+                                    (e.HttpClient.Response.ContentLength != 0) &&
+                                    (maxObjectSizeHTTP > e.HttpClient.Response.ContentLength))
                                 {
+
                                     // Serialize headers
                                     Dictionary<string, string> headerDictionary = new Dictionary<string, string>();
                                     IEnumerator<HttpHeader> headerEnumerator = e.HttpClient.Response.Headers.GetEnumerator();
@@ -824,16 +822,17 @@ namespace NKLI.DeDupeProxy
                                         sessionQueue.Flush();
                                     }
                                     catch { await WriteToConsole("<Titanium> [ERROR] Unable to write response body to cache", ConsoleColor.Red); }
+
                                 }
                             }
-                        }
-                        catch
-                        {
-                            //throw new Exception("Unable to output headers to cache");
-                            await WriteToConsole("<Titanium> [ERROR] Unable to output headers to cache", ConsoleColor.Red);
-                        }
+                            catch
+                            {
+                                //throw new Exception("Unable to output headers to cache");
+                                await WriteToConsole("<Titanium> [ERROR] Unable to output headers to cache", ConsoleColor.Red);
+                            }
 
 
+                        }
                     }
                 }
                 catch
@@ -1017,15 +1016,16 @@ namespace NKLI.DeDupeProxy
             {
                 // First delete from memory
                 if (memoryCache.Contains(key)) memoryCache.Remove(key);
-                // Then delete from disk
-                //File.Delete("Chunks\\" + key);
 
+                // Then delete from disk
+                if (chunkCache.ContainsKey(key)) chunkCache.TryRemove(key); // Add code to handle locked files gracefully later!
+                return true;
             }
             catch (Exception)
             {
 
             }
-            return true;
+            return false;
         }
         #endregion
         //END
@@ -1165,6 +1165,22 @@ namespace NKLI.DeDupeProxy
         public static bool IsExpired(this DateTime specificDate)
         {
             return specificDate < DateTime.Now;
+        }
+
+        public static string FormatSize(ulong size)
+        {
+            if (size > 1073741824) return String.Format("{0:n2}", ((decimal)size / (decimal)1073741824)) + "GB";
+            else if (size > 1048576) return String.Format("{0:n2}", ((decimal)size / (decimal)1048576)) + "MB";
+            else if (size > 1024) return String.Format("{0:n2}", ((decimal)size / (decimal)1024)) + "KB";
+            else return size + "B";
+        }
+
+        public static string FormatSize(int size)
+        {
+            if (size > 1073741824) return String.Format("{0:n2}", ((decimal)size / (decimal)1073741824)) + "GB";
+            else if (size > 1048576) return String.Format("{0:n2}", ((decimal)size / (decimal)1048576)) + "MB";
+            else if (size > 1024) return String.Format("{0:n2}", ((decimal)size / (decimal)1024)) + "KB";
+            else return size + "B";
         }
     }
 

@@ -140,9 +140,6 @@
     <Reference Include="Noemax.Compression.Net4.Trial, Version=17.301.0.0, Culture=neutral, PublicKeyToken=4c0defa954f97f18, processorArchitecture=MSIL">
       <HintPath>..\packages\Noemax.Compression.17.301.0\lib\net40\Noemax.Compression.Net4.Trial.dll</HintPath>
     </Reference>
-    <Reference Include="SJP.Sherlock, Version=1.0.0.0, Culture=neutral, processorArchitecture=MSIL">
-      <HintPath>..\packages\SJP.Sherlock.1.0.0\lib\net451\SJP.Sherlock.dll</HintPath>
-    </Reference>
     <Reference Include="SlidingWindow, Version=1.0.6.0, Culture=neutral, processorArchitecture=MSIL">
       <HintPath>..\packages\SlidingWindow.1.0.6\lib\net452\SlidingWindow.dll</HintPath>
     </Reference>

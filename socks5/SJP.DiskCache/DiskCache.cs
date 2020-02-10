@@ -6,7 +6,6 @@ using System.Security.Cryptography;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Threading;
-using SJP.Sherlock;
 
 namespace SJP.DiskCache
 {
@@ -119,6 +118,40 @@ namespace SJP.DiskCache
         /// </summary>
         public event EventHandler<ICacheEntry<TKey>> EntryRemoved;
 
+
+        /// <summary>
+        /// Attempts to remove a single entry from the cache
+        /// </summary>
+        /// /// <param name="key">The key used to locate the value in the cache.</param>
+        public bool TryRemove(TKey key)
+        {
+            var fileInfo = new FileInfo(_fileLookup[key].Name);
+            if (fileInfo.Exists)
+            {
+                try
+                {
+                    if (IsFileLockedWait(fileInfo, 500)) Console.WriteLine("Attempt to delete locked file: " + fileInfo);
+                    else
+                    {
+                        File.Delete(_fileLookup[key].Name);
+                        _fileLookup.TryRemove(key, out var tmpFilePath);
+                        _entryLookup.TryRemove(key, out var lookupEntry);
+                        EntryRemoved?.Invoke(this, lookupEntry);
+
+                        return true;
+                    }
+                }
+                catch (Exception e)
+                {
+                    //Console.WriteLine("EXCEPTION Testing for file lock: " + fileInfo);
+                    Console.WriteLine("EXCEPTION  filename: " + fileInfo);
+                    Console.WriteLine("EXCEPTION          : " + e);
+                }
+            }
+            return false;
+        }
+
+
         /// <summary>
         /// Empties the cache of all values that it is currently tracking.
         /// </summary>
@@ -133,10 +166,8 @@ namespace SJP.DiskCache
                     {
                         try
                         {
-                            //if (fileInfo.IsFileLocked()) Console.WriteLine("Attempt to delete locked file: " + fileInfo);
-                            //   continue;
-
-                            File.Delete(_fileLookup[entry.Key].Name);
+                            if (IsFileLockedWait(fileInfo, 500)) Console.WriteLine("Attempt to delete locked file: " + fileInfo);
+                            else File.Delete(_fileLookup[entry.Key].Name);
                         }
                         catch (Exception e)
                         {
@@ -146,7 +177,7 @@ namespace SJP.DiskCache
                         }
 
 
-                        
+
                     }
                     _entryLookup.TryRemove(entry.Key, out var lookupEntry);
                     EntryRemoved?.Invoke(this, lookupEntry);
@@ -176,12 +207,12 @@ namespace SJP.DiskCache
                 foreach (var entry in _entryLookup)
                 {
                     var fileInfo = new FileInfo(_fileLookup[entry.Key].Name);
-                    if (fileInfo.IsFileLocked())
-                        continue;
-
-                    File.Delete(_fileLookup[entry.Key].Name);
-                    _entryLookup.TryRemove(entry.Key, out var lookupEntry);
-                    EntryRemoved?.Invoke(this, lookupEntry);
+                    if (IsFileLocked(fileInfo)) Console.WriteLine("Attempt to delete locked file: " + fileInfo);
+                    {
+                        File.Delete(_fileLookup[entry.Key].Name);
+                        _entryLookup.TryRemove(entry.Key, out var lookupEntry);
+                        EntryRemoved?.Invoke(this, lookupEntry);
+                    }
                 }
 
                 if (!_entryLookup.IsEmpty)
@@ -644,13 +675,13 @@ namespace SJP.DiskCache
                 var key = expiredEntry.Key;
                 var filePath = _fileLookup[key].Name;
                 var fileInfo = new FileInfo(filePath);
-                if (fileInfo.IsFileLocked())
-                    continue;
-
-                fileInfo.Delete();
-                _fileLookup.TryRemove(key, out var tmpFilePath);
-                _entryLookup.TryRemove(key, out var lookupEntry);
-                EntryRemoved?.Invoke(this, lookupEntry);
+                if (IsFileLocked(fileInfo)) Console.WriteLine("Attempt to delete locked file: " + fileInfo);
+                {
+                    fileInfo.Delete();
+                    _fileLookup.TryRemove(key, out var tmpFilePath);
+                    _entryLookup.TryRemove(key, out var lookupEntry);
+                    EntryRemoved?.Invoke(this, lookupEntry);
+                }
             }
         }
 
@@ -713,6 +744,46 @@ namespace SJP.DiskCache
             /// The set operation failed because the data passed into the cache was too large.
             /// </summary>
             DataTooLarge
+        }
+
+        /// <summary>
+        /// Tests if file is locked and waits upto half for it to be released
+        /// </summary>
+        public bool IsFileLockedWait(FileInfo file, ulong msWait)
+        {
+            ulong attemptCounter = 0;
+            while (attemptCounter < (msWait / 10))
+            {
+                if (IsFileLocked(file)) attemptCounter++;
+                else return false;
+
+                Thread.Sleep(10);
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Tests if file is locked
+        /// </summary>
+        public bool IsFileLocked(FileInfo file)
+        {
+            var stream = (FileStream)null;
+            try
+            {
+                stream = file.Open(FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException)
+            {
+                return true;
+            }
+            finally
+            {
+                if (stream != null)
+                {
+                    stream.Close();
+                }
+            }
+            return false;
         }
     }
 
